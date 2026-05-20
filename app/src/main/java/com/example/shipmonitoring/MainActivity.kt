@@ -12,6 +12,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.shipmonitoring.ui.screens.SplashScreen
 import com.example.shipmonitoring.ui.screens.auth.AuthViewModel
 import com.example.shipmonitoring.ui.screens.auth.LoginScreen
 import com.example.shipmonitoring.ui.screens.manager.ManagerDashboardScreen
@@ -30,27 +31,36 @@ class MainActivity : ComponentActivity() {
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
 
-                    // NavHost adalah "wadah" untuk semua layar aplikasi Anda
                     NavHost(
                         navController = navController,
-                        startDestination = "login", // Layar pertama yang dibuka
+                        // UBAH startDestination MENJADI "splash"
+                        startDestination = "splash",
                         modifier = Modifier.padding(innerPadding)
                     ) {
 
-                        // 1. Rute Layar Login
-                        composable("login") {
-                            // Inisialisasi ViewModel untuk Login
-                            val authViewModel: AuthViewModel = viewModel()
+                        // 1. Rute Splash Screen
+                        composable("splash") {
+                            SplashScreen(
+                                onNavigateToLogin = {
+                                    navController.navigate("login") {
+                                        // Hancurkan splash screen dari memori agar user tidak bisa 'Back' ke splash
+                                        popUpTo("splash") { inclusive = true }
+                                    }
+                                }
+                            )
+                        }
 
+                        // 2. Rute Layar Login
+                        composable("login") {
+                            val authViewModel: AuthViewModel = viewModel()
                             LoginScreen(
                                 viewModel = authViewModel,
-                                onLoginSuccess = { role ->
-                                    // Logika perpindahan layar berdasarkan Role dari API
-                                    when (role.uppercase()) {
+                                onLoginSuccess = { user ->
+                                    when (user.role.uppercase()) {
                                         "NAHKODA" -> {
-                                            navController.navigate("nahkoda_dashboard") {
-                                                // Hapus layar login dari riwayat (Backstack)
-                                                // Agar saat di-back, aplikasi keluar, bukan kembali ke login
+                                            // Masukkan shipId ke dalam route navigasi
+                                            val shipId = user.shipId ?: "unknown"
+                                            navController.navigate("nahkoda_dashboard/$shipId") {
                                                 popUpTo("login") { inclusive = true }
                                             }
                                         }
@@ -59,29 +69,37 @@ class MainActivity : ComponentActivity() {
                                                 popUpTo("login") { inclusive = true }
                                             }
                                         }
-                                        "ADMIN" -> {
-                                            // TODO: Jika nanti ada AdminDashboardScreen, arahkan ke sini
-                                        }
                                     }
                                 }
                             )
                         }
 
-                        // 2. Rute Layar Dashboard Nahkoda
-                        composable("nahkoda_dashboard") {
-                            // Inisialisasi ViewModel untuk Nahkoda
+                        // 3. Rute Layar Dashboard Nahkoda (Terima Argumen)
+                        composable("nahkoda_dashboard/{shipId}") { backStackEntry ->
+                            // Ekstrak shipId dari parameter navigasi
+                            val shipId = backStackEntry.arguments?.getString("shipId") ?: ""
                             val nahkodaViewModel: NahkodaViewModel = viewModel()
 
                             NahkodaDashboardScreen(
                                 viewModel = nahkodaViewModel,
-                                // Di aplikasi nyata, shipId didapat dari data login (misal via SharedPreferences)
-                                shipId = "dummy-ship-id-123"
+                                shipId = shipId,
+                                onLogout = {
+                                    // Hentikan pelacakan GPS jika logout!
+                                    nahkodaViewModel.stopLiveLocation()
+                                    navController.navigate("login") { popUpTo(0) { inclusive = true } }
+                                }
                             )
                         }
 
-                        // 3. Rute Layar Dashboard Manager
+                        // 4. Rute Layar Dashboard Manager
                         composable("manager_dashboard") {
-                            ManagerDashboardScreen()
+                            ManagerDashboardScreen(
+                                onLogout = {
+                                    navController.navigate("login") {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
+                            )
                         }
                     }
                 }

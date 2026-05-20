@@ -7,7 +7,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
     // Gunakan IP lokal komputer (10.0.2.2 untuk emulator) atau URL Vercel nantinya
-    private const val BASE_URL = "http://10.0.2.2:3000/api/"
+    private const val BASE_URL = "https://ship-monitoring-be.vercel.app/api/"
 
     private val logging = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY // Penting untuk melihat log request di Logcat
