@@ -22,8 +22,13 @@ fun getFileFromUri(context: Context, uri: Uri): File? {
         }
     }
 
+    val sanitizedFileName = fileName
+        .replace(Regex("[^A-Za-z0-9._-]"), "_")
+        .take(100)
+        .ifBlank { "temp_document_${System.currentTimeMillis()}" }
+
     // Buat file sementara di folder cache aplikasi
-    val tempFile = File(context.cacheDir, fileName)
+    val tempFile = File(context.cacheDir, sanitizedFileName)
 
     return try {
         val inputStream: InputStream? = contentResolver.openInputStream(uri)
@@ -38,4 +43,15 @@ fun getFileFromUri(context: Context, uri: Uri): File? {
         e.printStackTrace()
         null
     }
+}
+
+fun getFileSizeFromUri(context: Context, uri: Uri): Long? {
+    val projection = arrayOf(OpenableColumns.SIZE)
+    context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
+        val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+        if (sizeIndex != -1 && cursor.moveToFirst()) {
+            return cursor.getLong(sizeIndex)
+        }
+    }
+    return null
 }

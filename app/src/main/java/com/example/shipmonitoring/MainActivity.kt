@@ -12,7 +12,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.example.shipmonitoring.data.api.AppContainer
 import com.example.shipmonitoring.ui.screens.SplashScreen
+import com.example.shipmonitoring.ui.screens.admin.AdminDashboardScreen
 import com.example.shipmonitoring.ui.screens.auth.AuthViewModel
 import com.example.shipmonitoring.ui.screens.auth.LoginScreen
 import com.example.shipmonitoring.ui.screens.manager.ManagerDashboardScreen
@@ -23,6 +25,7 @@ import com.example.shipmonitoring.ui.theme.ShipMonitoringTheme
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        AppContainer.init(applicationContext)
         enableEdgeToEdge()
         setContent {
             ShipMonitoringTheme {
@@ -58,9 +61,7 @@ class MainActivity : ComponentActivity() {
                                 onLoginSuccess = { user ->
                                     when (user.role.uppercase()) {
                                         "NAHKODA" -> {
-                                            // Masukkan shipId ke dalam route navigasi
-                                            val shipId = user.shipId ?: "unknown"
-                                            navController.navigate("nahkoda_dashboard/$shipId") {
+                                            navController.navigate("nahkoda_dashboard") {
                                                 popUpTo("login") { inclusive = true }
                                             }
                                         }
@@ -69,23 +70,28 @@ class MainActivity : ComponentActivity() {
                                                 popUpTo("login") { inclusive = true }
                                             }
                                         }
+                                        "ADMIN" -> {
+                                            navController.navigate("admin_dashboard") {
+                                                popUpTo("login") { inclusive = true }
+                                            }
+                                        }
+                                        else -> {
+                                            navController.navigate("login") {
+                                                popUpTo("login") { inclusive = true }
+                                            }
+                                        }
                                     }
                                 }
                             )
                         }
 
-                        // 3. Rute Layar Dashboard Nahkoda (Terima Argumen)
-                        composable("nahkoda_dashboard/{shipId}") { backStackEntry ->
-                            // Ekstrak shipId dari parameter navigasi
-                            val shipId = backStackEntry.arguments?.getString("shipId") ?: ""
+                        // 3. Rute Layar Dashboard Nahkoda
+                        composable("nahkoda_dashboard") {
                             val nahkodaViewModel: NahkodaViewModel = viewModel()
 
                             NahkodaDashboardScreen(
                                 viewModel = nahkodaViewModel,
-                                shipId = shipId,
                                 onLogout = {
-                                    // Hentikan pelacakan GPS jika logout!
-                                    nahkodaViewModel.stopLiveLocation()
                                     navController.navigate("login") { popUpTo(0) { inclusive = true } }
                                 }
                             )
@@ -94,6 +100,16 @@ class MainActivity : ComponentActivity() {
                         // 4. Rute Layar Dashboard Manager
                         composable("manager_dashboard") {
                             ManagerDashboardScreen(
+                                onLogout = {
+                                    navController.navigate("login") {
+                                        popUpTo(0) { inclusive = true }
+                                    }
+                                }
+                            )
+                        }
+
+                        composable("admin_dashboard") {
+                            AdminDashboardScreen(
                                 onLogout = {
                                     navController.navigate("login") {
                                         popUpTo(0) { inclusive = true }

@@ -1,4 +1,4 @@
-package com.example.shipmonitoring.ui.screens.manager
+package com.example.shipmonitoring.ui.screens.admin
 
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -27,21 +28,24 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -66,13 +70,18 @@ import com.google.maps.android.compose.rememberCameraPositionState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ManagerDashboardScreen(
+fun AdminDashboardScreen(
     onLogout: () -> Unit,
-    viewModel: ManagerViewModel = viewModel()
+    viewModel: AdminViewModel = viewModel()
 ) {
     var selectedTab by remember { mutableIntStateOf(0) }
     var selectedSubmission by remember { mutableStateOf<SubmissionResponse?>(null) }
     var shipNumberQuery by remember { mutableStateOf("") }
+    var showPendingOnly by remember { mutableStateOf(true) }
+
+    var approveTarget by remember { mutableStateOf<SubmissionResponse?>(null) }
+    var rejectTarget by remember { mutableStateOf<SubmissionResponse?>(null) }
+    var rejectReason by remember { mutableStateOf("") }
 
     val submissions by viewModel.submissions.collectAsState()
     val isSubmissionsLoading by viewModel.isSubmissionsLoading.collectAsState()
@@ -86,10 +95,18 @@ fun ManagerDashboardScreen(
     val isRefreshingLocation by viewModel.isRefreshingLocation.collectAsState()
     val locationError by viewModel.locationError.collectAsState()
 
+    val actionState by viewModel.actionState.collectAsState()
+
+    val filteredSubmissions = if (showPendingOnly) {
+        submissions.filter { it.status.equals("PENDING", ignoreCase = true) }
+    } else {
+        submissions
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Dashboard Manager", fontWeight = FontWeight.Bold) },
+                title = { Text("Dashboard Admin", fontWeight = FontWeight.Bold) },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     titleContentColor = MaterialTheme.colorScheme.onPrimary,
@@ -114,7 +131,7 @@ fun ManagerDashboardScreen(
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text("Pengajuan Masuk") }
+                    text = { Text("Validasi Pengajuan") }
                 )
                 Tab(
                     selected = selectedTab == 1,
@@ -129,15 +146,24 @@ fun ManagerDashboardScreen(
             }
 
             when (selectedTab) {
-                0 -> SubmissionInboxTab(
-                    submissions = submissions,
+                0 -> ValidationTab(
+                    submissions = filteredSubmissions,
                     isLoading = isSubmissionsLoading,
                     errorMessage = submissionsError,
+                    actionState = actionState,
+                    showPendingOnly = showPendingOnly,
+                    onTogglePending = { showPendingOnly = it },
                     onRefresh = { viewModel.refreshSubmissions() },
-                    onDetail = { selectedSubmission = it }
+                    onDismissMessage = { viewModel.resetActionState() },
+                    onDetail = { selectedSubmission = it },
+                    onApprove = { approveTarget = it },
+                    onReject = {
+                        rejectTarget = it
+                        rejectReason = ""
+                    }
                 )
 
-                1 -> SubmissionHistoryTab(
+                1 -> AdminHistoryTab(
                     query = shipNumberQuery,
                     onQueryChange = { shipNumberQuery = it },
                     history = shipHistory,
@@ -147,7 +173,7 @@ fun ManagerDashboardScreen(
                     onDetail = { selectedSubmission = it }
                 )
 
-                else -> LiveLocationTab(
+                else -> AdminLiveLocationTab(
                     locations = locations,
                     isRefreshing = isRefreshingLocation,
                     errorMessage = locationError,
@@ -163,15 +189,72 @@ fun ManagerDashboardScreen(
             onDismiss = { selectedSubmission = null }
         )
     }
+
+    approveTarget?.let { submission ->
+        AlertDialog(
+            onDismissRequest = { approveTarget = null },
+            title = { Text("Konfirmasi") },
+            text = { Text("Apakah Anda yakin ingin menyetujui pengajuan ini?") },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.approveSubmission(submission.id)
+                    approveTarget = null
+                }) {
+                    Text("Setujui")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { approveTarget = null }) {
+                    Text("Batal")
+                }
+            }
+        )
+    }
+
+    rejectTarget?.let { submission ->
+        AlertDialog(
+            onDismissRequest = { rejectTarget = null },
+            title = { Text("Alasan penolakan") },
+            text = {
+                OutlinedTextField(
+                    value = rejectReason,
+                    onValueChange = { rejectReason = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Alasan penolakan") }
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.rejectSubmission(submission.id, rejectReason)
+                    if (rejectReason.isNotBlank()) {
+                        rejectTarget = null
+                    }
+                }) {
+                    Text("Tolak Pengajuan")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { rejectTarget = null }) {
+                    Text("Batalkan")
+                }
+            }
+        )
+    }
 }
 
 @Composable
-private fun SubmissionInboxTab(
+private fun ValidationTab(
     submissions: List<SubmissionResponse>,
     isLoading: Boolean,
     errorMessage: String?,
+    actionState: SubmissionActionState,
+    showPendingOnly: Boolean,
+    onTogglePending: (Boolean) -> Unit,
     onRefresh: () -> Unit,
-    onDetail: (SubmissionResponse) -> Unit
+    onDismissMessage: () -> Unit,
+    onDetail: (SubmissionResponse) -> Unit,
+    onApprove: (SubmissionResponse) -> Unit,
+    onReject: (SubmissionResponse) -> Unit
 ) {
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -184,11 +267,46 @@ private fun SubmissionInboxTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Pengajuan Masuk", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Column {
+                    Text("Validasi Pengajuan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Switch(checked = showPendingOnly, onCheckedChange = onTogglePending)
+                        Text("Tampilkan hanya PENDING")
+                    }
+                }
                 IconButton(onClick = onRefresh) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh submissions")
                 }
             }
+        }
+
+        when (actionState) {
+            SubmissionActionState.Loading -> item { CircularProgressIndicator() }
+            is SubmissionActionState.Success -> {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(actionState.message, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                            TextButton(onClick = onDismissMessage) { Text("Tutup") }
+                        }
+                    }
+                }
+            }
+            is SubmissionActionState.Error -> {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(actionState.message, color = MaterialTheme.colorScheme.onErrorContainer)
+                            TextButton(onClick = onDismissMessage) { Text("Tutup") }
+                        }
+                    }
+                }
+            }
+            SubmissionActionState.Idle -> Unit
         }
 
         if (isLoading) {
@@ -206,21 +324,23 @@ private fun SubmissionInboxTab(
         }
 
         if (!isLoading && submissions.isEmpty()) {
-            item { Text("Belum ada data pengajuan.") }
+            item { Text("Data pengajuan tidak ditemukan.") }
         }
 
         items(submissions, key = { it.id }) { submission ->
             SubmissionSummaryCard(
                 submission = submission,
-                showValidationAction = false,
-                onDetail = onDetail
+                showValidationAction = true,
+                onDetail = onDetail,
+                onApprove = onApprove,
+                onReject = onReject
             )
         }
     }
 }
 
 @Composable
-private fun SubmissionHistoryTab(
+private fun AdminHistoryTab(
     query: String,
     onQueryChange: (String) -> Unit,
     history: List<SubmissionResponse>,
@@ -283,7 +403,7 @@ private fun SubmissionHistoryTab(
 }
 
 @Composable
-private fun LiveLocationTab(
+private fun AdminLiveLocationTab(
     locations: List<ShipLocation>,
     isRefreshing: Boolean,
     errorMessage: String?,
@@ -393,14 +513,14 @@ private fun LiveLocationTab(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(locations, key = { it.shipId }) { ship ->
-                ShipLocationInfoCard(ship)
+                AdminShipLocationInfoCard(ship)
             }
         }
     }
 }
 
 @Composable
-private fun ShipLocationInfoCard(ship: ShipLocation) {
+private fun AdminShipLocationInfoCard(ship: ShipLocation) {
     val isActive = isLocationActive(ship.lastUpdatedAt)
     val statusText = if (isActive) "Kapal aktif" else "Status: Tidak Aktif"
 

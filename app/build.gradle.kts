@@ -22,9 +22,23 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val debugBaseUrl = providers
+        .gradleProperty("DEBUG_BASE_URL")
+        .orElse("http://10.0.2.2:3000/api/")
+    val releaseBaseUrl = providers
+        .gradleProperty("RELEASE_BASE_URL")
+        .orElse("https://ship-monitoring-be.vercel.app/api/")
+
     buildTypes {
+        debug {
+            buildConfigField("String", "API_BASE_URL", "\"${debugBaseUrl.get()}\"")
+            // More secure than BODY: do not print payload by default.
+            buildConfigField("String", "HTTP_LOG_LEVEL", "\"BASIC\"")
+        }
         release {
             isMinifyEnabled = false
+            buildConfigField("String", "API_BASE_URL", "\"${releaseBaseUrl.get()}\"")
+            buildConfigField("String", "HTTP_LOG_LEVEL", "\"NONE\"")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -60,6 +74,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.8")
     // ViewModel & Lifecycle
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("androidx.compose.material:material-icons-extended")
     // Google Play Services Location (Untuk Nahkoda mengambil koordinat GPS)
     implementation("com.google.android.gms:play-services-location:21.0.1")
@@ -68,8 +83,7 @@ dependencies {
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     // Coil untuk memuat gambar dari URL URL
     implementation("io.coil-kt:coil-compose:2.5.0")
-    // Material Icons Extended (Untuk ikon Show/Hide mata dan Logout)
-    implementation("androidx.compose.material:material-icons-extended:1.5.4")
+    implementation("androidx.datastore:datastore-preferences:1.2.1")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

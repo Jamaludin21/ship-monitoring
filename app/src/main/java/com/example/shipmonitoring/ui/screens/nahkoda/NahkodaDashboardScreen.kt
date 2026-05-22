@@ -5,59 +5,127 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.example.shipmonitoring.data.model.SubmissionResponse
+import com.example.shipmonitoring.ui.common.formatDateShort
+import com.example.shipmonitoring.ui.common.statusLabel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NahkodaDashboardScreen(
     viewModel: NahkodaViewModel,
-    shipId: String,
     onLogout: () -> Unit
 ) {
     val context = LocalContext.current
-    val uploadState by viewModel.uploadState.collectAsState()
 
-    // Memantau state apakah GPS sedang menyala atau mati dari ViewModel
+    val profile by viewModel.profile.collectAsState()
+    val submissionState by viewModel.submissionState.collectAsState()
     val isTrackingLive by viewModel.isTrackingLive.collectAsState()
 
-    var selectedFileUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedFileName by remember { mutableStateOf("Belum ada dokumen yang dipilih") }
+    val history by viewModel.history.collectAsState()
+    val isHistoryLoading by viewModel.isHistoryLoading.collectAsState()
+    val historyError by viewModel.historyError.collectAsState()
 
-    val documentPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        selectedFileUri = uri
-        selectedFileName = if (uri != null) "Dokumen dipilih, siap diunggah" else "Batal memilih dokumen"
+    var captainName by remember { mutableStateOf("") }
+    var employeeCount by remember { mutableStateOf("") }
+    var cargo by remember { mutableStateOf("") }
+    var cargoAmount by remember { mutableStateOf("") }
+
+    var sailingPermitUri by remember { mutableStateOf<Uri?>(null) }
+    var callSignCertificateUri by remember { mutableStateOf<Uri?>(null) }
+    var safetyCertificateUri by remember { mutableStateOf<Uri?>(null) }
+    var radioStationPermitUri by remember { mutableStateOf<Uri?>(null) }
+
+    LaunchedEffect(profile.userName) {
+        if (captainName.isBlank() && profile.userName.isNotBlank()) {
+            captainName = profile.userName
+        }
     }
 
-    // --- REQUEST PERMISSION UNTUK LOKASI (BEST PRACTICE) ---
+    val sailingPermitPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
+        sailingPermitUri = it
+    }
+    val callSignPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
+        callSignCertificateUri = it
+    }
+    val safetyPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
+        safetyCertificateUri = it
+    }
+    val radioPermitPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) {
+        radioStationPermitUri = it
+    }
+
     val locationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val isFineLocationGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
-        val isCoarseLocationGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
 
-        if (isFineLocationGranted || isCoarseLocationGranted) {
-            // Izin Diberikan -> Nyalakan GPS!
-            viewModel.startLiveLocation(context, shipId)
-            Toast.makeText(context, "Radar GPS Aktif", Toast.LENGTH_SHORT).show()
+        if (fineGranted || coarseGranted) {
+            viewModel.startLiveLocation(context)
+            Toast.makeText(context, "Radar GPS aktif", Toast.LENGTH_SHORT).show()
         } else {
-            // Izin Ditolak
-            Toast.makeText(context, "Izin Lokasi Diperlukan untuk melacak kapal", Toast.LENGTH_LONG).show()
+            Toast.makeText(context, "Izin lokasi diperlukan untuk live location.", Toast.LENGTH_LONG).show()
         }
     }
+
+    val employeeValid = employeeCount.toIntOrNull()?.let { it > 0 } == true
+    val isFormValid =
+        isTrackingLive &&
+            captainName.isNotBlank() &&
+            employeeValid &&
+            cargo.isNotBlank() &&
+            cargoAmount.isNotBlank() &&
+            sailingPermitUri != null &&
+            callSignCertificateUri != null &&
+            safetyCertificateUri != null &&
+            radioStationPermitUri != null
 
     Scaffold(
         topBar = {
@@ -69,113 +137,323 @@ fun NahkodaDashboardScreen(
                     actionIconContentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 actions = {
-                    IconButton(onClick = onLogout) {
+                    IconButton(onClick = {
+                        viewModel.logout(onDone = onLogout)
+                    }) {
                         Icon(imageVector = Icons.AutoMirrored.Filled.ExitToApp, contentDescription = "Logout")
                     }
                 }
             )
         }
     ) { paddingValues ->
-        Column(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // =====================================
-            // BAGIAN 1: KONTROL LOKASI KAPAL (BARU)
-            // =====================================
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isTrackingLive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                )
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.LocationOn,
-                        contentDescription = null,
-                        tint = if (isTrackingLive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("Sistem Radar (Live Location)", fontWeight = FontWeight.Bold)
-                        Text(
-                            text = if (isTrackingLive) "Menyiarkan posisi kapal..." else "Radar dimatikan",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                    Switch(
-                        checked = isTrackingLive,
-                        onCheckedChange = { isChecked ->
-                            if (isChecked) {
-                                // Minta Izin dulu sebelum menyalakan
-                                locationPermissionLauncher.launch(
-                                    arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-                                )
-                            } else {
-                                viewModel.stopLiveLocation()
-                            }
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isTrackingLive) {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant
                         }
                     )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-            HorizontalDivider()
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // =====================================
-            // BAGIAN 2: UPLOAD DOKUMEN KAPAL
-            // =====================================
-            Text("Pengajuan Dokumen Berlabuh", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.Start))
-            Spacer(modifier = Modifier.height(16.dp))
-
-            OutlinedButton(
-                onClick = { documentPickerLauncher.launch("application/pdf") },
-                modifier = Modifier.fillMaxWidth().height(56.dp)
-            ) {
-                Icon(Icons.Default.UploadFile, contentDescription = "Pilih File")
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Pilih Dokumen PDF")
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(text = selectedFileName, style = MaterialTheme.typography.bodySmall)
-            Spacer(modifier = Modifier.height(24.dp))
-
-            when (uploadState) {
-                is UploadState.Loading -> CircularProgressIndicator()
-                is UploadState.Success -> {
-                    val message = (uploadState as UploadState.Success).message
-                    Icon(Icons.Default.CheckCircle, contentDescription = "Sukses", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
-                    Text(message, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-                    Button(onClick = {
-                        viewModel.resetState()
-                        selectedFileUri = null
-                        selectedFileName = "Belum ada dokumen yang dipilih"
-                    }) { Text("Ajukan Lainnya") }
-                }
-                is UploadState.Error -> {
-                    val message = (uploadState as UploadState.Error).message
-                    Text(message, color = MaterialTheme.colorScheme.error)
-                    Button(onClick = { viewModel.resetState() }) { Text("Coba Lagi") }
-                }
-                is UploadState.Idle -> {
-                    Button(
-                        onClick = {
-                            selectedFileUri?.let { uri -> viewModel.uploadDokumen(context, uri, shipId) }
-                        },
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        enabled = selectedFileUri != null
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Kirim Dokumen Pengajuan", style = MaterialTheme.typography.titleMedium)
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = if (isTrackingLive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Radar Aktif", fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (isTrackingLive) {
+                                    "Lokasi sedang dikirim ke sistem"
+                                } else {
+                                    "Radar belum aktif"
+                                },
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Switch(
+                            checked = isTrackingLive,
+                            onCheckedChange = { checked ->
+                                if (checked) {
+                                    locationPermissionLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION
+                                        )
+                                    )
+                                } else {
+                                    viewModel.stopLiveLocation()
+                                }
+                            }
+                        )
                     }
                 }
+            }
+
+            item {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text("Form Pengajuan Berlabuh", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+
+                        Text("Nomor Kapal: ${profile.shipNumber ?: "-"}")
+                        Text("Nama Kapal: ${profile.shipName ?: "-"}")
+
+                        HorizontalDivider()
+
+                        OutlinedTextField(
+                            value = captainName,
+                            onValueChange = { captainName = it },
+                            label = { Text("Nama Nahkoda") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = employeeCount,
+                            onValueChange = { employeeCount = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Jumlah Pegawai") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                        )
+                        OutlinedTextField(
+                            value = cargo,
+                            onValueChange = { cargo = it },
+                            label = { Text("Muatan") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+                        OutlinedTextField(
+                            value = cargoAmount,
+                            onValueChange = { cargoAmount = it },
+                            label = { Text("Jumlah Muatan") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true
+                        )
+
+                        DocumentPickerField(
+                            label = "Dokumen Surat Izin Berlayar",
+                            selected = sailingPermitUri != null,
+                            onPick = { sailingPermitPicker.launch("application/pdf") }
+                        )
+                        DocumentPickerField(
+                            label = "Dokumen Surat Tanda Panggilan",
+                            selected = callSignCertificateUri != null,
+                            onPick = { callSignPicker.launch("application/pdf") }
+                        )
+                        DocumentPickerField(
+                            label = "Dokumen Sertifikat Keselamatan",
+                            selected = safetyCertificateUri != null,
+                            onPick = { safetyPicker.launch("application/pdf") }
+                        )
+                        DocumentPickerField(
+                            label = "Dokumen Surat Izin Stasiun Radio Kapal",
+                            selected = radioStationPermitUri != null,
+                            onPick = { radioPermitPicker.launch("application/pdf") }
+                        )
+
+                        if (!isTrackingLive) {
+                            Text(
+                                text = "Aktifkan live location terlebih dahulu sebelum mengirim pengajuan.",
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+
+                        when (submissionState) {
+                            SubmissionState.Loading -> {
+                                CircularProgressIndicator()
+                            }
+
+                            is SubmissionState.Success -> {
+                                Text(
+                                    text = (submissionState as SubmissionState.Success).message,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Button(onClick = {
+                                    viewModel.resetSubmissionState()
+                                    employeeCount = ""
+                                    cargo = ""
+                                    cargoAmount = ""
+                                    sailingPermitUri = null
+                                    callSignCertificateUri = null
+                                    safetyCertificateUri = null
+                                    radioStationPermitUri = null
+                                }) {
+                                    Text("Buat Pengajuan Baru")
+                                }
+                            }
+
+                            is SubmissionState.Error -> {
+                                Text(
+                                    text = (submissionState as SubmissionState.Error).message,
+                                    color = MaterialTheme.colorScheme.error,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+
+                            SubmissionState.Idle -> Unit
+                        }
+
+                        Button(
+                            onClick = {
+                                viewModel.submitBerthingRequest(
+                                    context = context,
+                                    captainName = captainName,
+                                    employeeCount = employeeCount,
+                                    cargo = cargo,
+                                    cargoAmount = cargoAmount,
+                                    sailingPermitUri = sailingPermitUri!!,
+                                    callSignCertificateUri = callSignCertificateUri!!,
+                                    safetyCertificateUri = safetyCertificateUri!!,
+                                    radioStationPermitUri = radioStationPermitUri!!
+                                )
+                            },
+                            enabled = isFormValid && submissionState !is SubmissionState.Loading,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("Kirim Pengajuan Berlabuh")
+                        }
+                    }
+                }
+            }
+
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Riwayat Pengajuan Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { viewModel.loadMySubmissionHistory() }) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh history")
+                    }
+                }
+            }
+
+            if (isHistoryLoading) {
+                item {
+                    CircularProgressIndicator()
+                }
+            }
+
+            if (!historyError.isNullOrBlank()) {
+                item {
+                    Text(
+                        text = historyError ?: "",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+
+            if (!isHistoryLoading && history.isEmpty()) {
+                item {
+                    Text(
+                        text = "Belum ada pengajuan.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            items(history, key = { it.id }) { submission ->
+                NahkodaHistoryCard(submission)
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(10.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun DocumentPickerField(
+    label: String,
+    selected: Boolean,
+    onPick: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (selected) "File PDF dipilih" else "Belum memilih file",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            OutlinedButton(onClick = onPick) {
+                Icon(Icons.Default.UploadFile, contentDescription = null)
+                Spacer(modifier = Modifier.width(3.dp))
+                Text("Pilih")
+            }
+        }
+    }
+}
+
+@Composable
+private fun NahkodaHistoryCard(submission: SubmissionResponse) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "${submission.ship.shipNumber} - ${submission.ship.name}",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text("Muatan: ${submission.cargo} - ${submission.cargoAmount}")
+            Text("Tanggal: ${formatDateShort(submission.submittedAt)}")
+            Text("Status: ${statusLabel(submission.status)}")
+
+            if (submission.status.equals("REJECTED", ignoreCase = true) && !submission.reviewNote.isNullOrBlank()) {
+                Text(
+                    text = "Catatan admin: ${submission.reviewNote}",
+                    color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
     }

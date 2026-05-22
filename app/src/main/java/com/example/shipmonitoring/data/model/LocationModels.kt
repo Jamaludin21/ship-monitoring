@@ -8,7 +8,9 @@ data class UpdateLocationRequest(
 
 data class ShipLocation(
     val shipId: String,
+    val shipNumber: String,
     val shipName: String,
     val latitude: Double,
-    val longitude: Double
+    val longitude: Double,
+    val lastUpdatedAt: String?
 )
