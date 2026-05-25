@@ -1,5 +1,8 @@
 package com.example.shipmonitoring.ui.screens.admin
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
@@ -16,48 +19,62 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.AssignmentTurnedIn
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.shipmonitoring.data.model.ShipLocation
 import com.example.shipmonitoring.data.model.SubmissionResponse
+import com.example.shipmonitoring.ui.common.CenteredInlineLoading
+import com.example.shipmonitoring.ui.common.rememberCurrentTimeMillis
 import com.example.shipmonitoring.ui.common.SubmissionDetailDialog
 import com.example.shipmonitoring.ui.common.SubmissionSummaryCard
 import com.example.shipmonitoring.ui.common.formatDateTime
 import com.example.shipmonitoring.ui.common.isLocationActive
 import com.example.shipmonitoring.ui.common.relativeTimeLabel
+import com.example.shipmonitoring.utils.getDisplayNameFromUri
+import com.example.shipmonitoring.utils.sanitizeShipNumberInput
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
@@ -67,6 +84,13 @@ import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
+import kotlinx.coroutines.delay
+
+private enum class AdminMenu(val label: String, val icon: ImageVector) {
+    VALIDASI("Validasi", Icons.Default.AssignmentTurnedIn),
+    HISTORY("History", Icons.Default.History),
+    LOKASI("Lokasi", Icons.Default.LocationOn)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,7 +98,7 @@ fun AdminDashboardScreen(
     onLogout: () -> Unit,
     viewModel: AdminViewModel = viewModel()
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedMenu by rememberSaveable { mutableStateOf(AdminMenu.VALIDASI.name) }
     var selectedSubmission by remember { mutableStateOf<SubmissionResponse?>(null) }
     var shipNumberQuery by remember { mutableStateOf("") }
     var showPendingOnly by remember { mutableStateOf(true) }
@@ -96,6 +120,7 @@ fun AdminDashboardScreen(
     val locationError by viewModel.locationError.collectAsState()
 
     val actionState by viewModel.actionState.collectAsState()
+    val inspectionDataBySubmission by viewModel.inspectionDataBySubmission.collectAsState()
 
     val filteredSubmissions = if (showPendingOnly) {
         submissions.filter { it.status.equals("PENDING", ignoreCase = true) }
@@ -103,14 +128,22 @@ fun AdminDashboardScreen(
         submissions
     }
 
+    val reviewedSubmissions = remember(submissions) {
+        submissions.filterNot { it.status.equals("PENDING", ignoreCase = true) }
+    }
+    val isHistoryFilteredByShip = shipNumberQuery.isNotBlank()
+    val historyItems = if (isHistoryFilteredByShip) shipHistory else reviewedSubmissions
+    val historyLoadingState = if (isHistoryFilteredByShip) isHistoryLoading else isSubmissionsLoading
+    val historyErrorState = if (isHistoryFilteredByShip) historyError else submissionsError
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Dashboard Admin", fontWeight = FontWeight.Bold) },
+            CenterAlignedTopAppBar(
+                title = { Text("Admin", fontWeight = FontWeight.SemiBold) },
+                expandedHeight = 52.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 actions = {
                     IconButton(onClick = {
@@ -120,33 +153,25 @@ fun AdminDashboardScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            NavigationBar {
+                AdminMenu.entries.forEach { menu ->
+                    NavigationBarItem(
+                        selected = selectedMenu == menu.name,
+                        onClick = { selectedMenu = menu.name },
+                        icon = { Icon(menu.icon, contentDescription = menu.label) },
+                        label = { Text(menu.label) }
+                    )
+                }
+            }
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            PrimaryTabRow(selectedTabIndex = selectedTab) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text("Validasi Pengajuan") }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = { Text("History Kapal") }
-                )
-                Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    text = { Text("Live Location") }
-                )
-            }
-
-            when (selectedTab) {
-                0 -> ValidationTab(
+        when (AdminMenu.valueOf(selectedMenu)) {
+            AdminMenu.VALIDASI -> ValidationTab(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
                     submissions = filteredSubmissions,
                     isLoading = isSubmissionsLoading,
                     errorMessage = submissionsError,
@@ -163,23 +188,71 @@ fun AdminDashboardScreen(
                     }
                 )
 
-                1 -> AdminHistoryTab(
+            AdminMenu.HISTORY -> AdminHistoryTab(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
                     query = shipNumberQuery,
-                    onQueryChange = { shipNumberQuery = it },
-                    history = shipHistory,
-                    isLoading = isHistoryLoading,
-                    errorMessage = historyError,
-                    onSearch = { viewModel.searchShipHistory(shipNumberQuery) },
-                    onDetail = { selectedSubmission = it }
+                    onQueryChange = { input ->
+                        val sanitized = sanitizeShipNumberInput(input)
+                        shipNumberQuery = sanitized
+                        if (sanitized.isBlank()) {
+                            viewModel.clearHistorySearchState()
+                        }
+                    },
+                    history = historyItems,
+                    inspectionDataBySubmission = inspectionDataBySubmission,
+                    isLoading = historyLoadingState,
+                    errorMessage = historyErrorState,
+                    isFilteredByShip = isHistoryFilteredByShip,
+                    onSearch = {
+                        if (shipNumberQuery.isBlank()) {
+                            viewModel.clearHistorySearchState()
+                            viewModel.refreshSubmissions()
+                        } else {
+                            viewModel.searchShipHistory(shipNumberQuery)
+                        }
+                    },
+                    onRefresh = {
+                        if (shipNumberQuery.isBlank()) {
+                            viewModel.refreshSubmissions()
+                        } else {
+                            viewModel.searchShipHistory(shipNumberQuery)
+                        }
+                    },
+                    onDetail = { selectedSubmission = it },
+                    onChecklistModeChange = { submissionId, enabled ->
+                        viewModel.setChecklistMode(submissionId, enabled)
+                    },
+                    onChecklistChoiceChange = { submissionId, itemNumber, choice ->
+                        viewModel.updateChecklistChoice(submissionId, itemNumber, choice)
+                    },
+                    onChecklistNoteChange = { submissionId, itemNumber, note ->
+                        viewModel.updateChecklistNote(submissionId, itemNumber, note)
+                    },
+                    onSummaryNoteChange = { submissionId, note ->
+                        viewModel.updateSummaryNote(submissionId, note)
+                    },
+                    onInspectionDocChange = { submissionId, fileName, uriString ->
+                        viewModel.updateInspectionDocument(submissionId, fileName, uriString)
+                    },
+                    onReplyDocChange = { submissionId, fileName, uriString ->
+                        viewModel.updateReplyLetterDocument(submissionId, fileName, uriString)
+                    },
+                    onSaveInspection = { submissionId ->
+                        viewModel.saveInspectionData(submissionId)
+                    }
                 )
 
-                else -> AdminLiveLocationTab(
+            AdminMenu.LOKASI -> AdminLiveLocationTab(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
                     locations = locations,
                     isRefreshing = isRefreshingLocation,
                     errorMessage = locationError,
                     onRefresh = { viewModel.refreshLocationOnce() }
                 )
-            }
         }
     }
 
@@ -197,7 +270,12 @@ fun AdminDashboardScreen(
             text = { Text("Apakah Anda yakin ingin menyetujui pengajuan ini?") },
             confirmButton = {
                 Button(onClick = {
-                    viewModel.approveSubmission(submission.id)
+                    val approvedShipNumber = submission.ship.shipNumber
+                    viewModel.approveSubmission(submission.id) {
+                        selectedMenu = AdminMenu.HISTORY.name
+                        shipNumberQuery = sanitizeShipNumberInput(approvedShipNumber)
+                        viewModel.searchShipHistory(approvedShipNumber)
+                    }
                     approveTarget = null
                 }) {
                     Text("Setujui")
@@ -244,6 +322,7 @@ fun AdminDashboardScreen(
 
 @Composable
 private fun ValidationTab(
+    modifier: Modifier,
     submissions: List<SubmissionResponse>,
     isLoading: Boolean,
     errorMessage: String?,
@@ -257,31 +336,44 @@ private fun ValidationTab(
     onReject: (SubmissionResponse) -> Unit
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Row(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
             ) {
-                Column {
-                    Text("Validasi Pengajuan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Switch(checked = showPendingOnly, onCheckedChange = onTogglePending)
-                        Text("Tampilkan hanya PENDING")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text("Validasi Pengajuan", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = if (showPendingOnly) "Mode: hanya PENDING" else "Mode: semua pengajuan",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
-                }
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh submissions")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Pending", style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Switch(checked = showPendingOnly, onCheckedChange = onTogglePending)
+                        IconButton(onClick = onRefresh) {
+                            Icon(Icons.Default.Refresh, contentDescription = "Refresh submissions")
+                        }
+                    }
                 }
             }
         }
 
         when (actionState) {
-            SubmissionActionState.Loading -> item { CircularProgressIndicator() }
+            SubmissionActionState.Loading -> item { CenteredInlineLoading() }
             is SubmissionActionState.Success -> {
                 item {
                     Card(
@@ -310,7 +402,7 @@ private fun ValidationTab(
         }
 
         if (isLoading) {
-            item { CircularProgressIndicator() }
+            item { CenteredInlineLoading() }
         }
 
         if (!errorMessage.isNullOrBlank()) {
@@ -341,41 +433,85 @@ private fun ValidationTab(
 
 @Composable
 private fun AdminHistoryTab(
+    modifier: Modifier,
     query: String,
     onQueryChange: (String) -> Unit,
     history: List<SubmissionResponse>,
+    inspectionDataBySubmission: Map<String, SubmissionInspectionData>,
     isLoading: Boolean,
     errorMessage: String?,
+    isFilteredByShip: Boolean,
     onSearch: () -> Unit,
-    onDetail: (SubmissionResponse) -> Unit
+    onRefresh: () -> Unit,
+    onDetail: (SubmissionResponse) -> Unit,
+    onChecklistModeChange: (submissionId: String, enabled: Boolean) -> Unit,
+    onChecklistChoiceChange: (submissionId: String, itemNumber: Int, choice: ChecklistChoice) -> Unit,
+    onChecklistNoteChange: (submissionId: String, itemNumber: Int, note: String) -> Unit,
+    onSummaryNoteChange: (submissionId: String, note: String) -> Unit,
+    onInspectionDocChange: (submissionId: String, fileName: String?, uriString: String?) -> Unit,
+    onReplyDocChange: (submissionId: String, fileName: String?, uriString: String?) -> Unit,
+    onSaveInspection: (submissionId: String) -> Unit
 ) {
+    val orderedHistory = remember(history) { history.sortedByDescending { it.submittedAt } }
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("History Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("History Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh history")
+                }
+            }
         }
 
         item {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search by nomor kapal") },
-                singleLine = true
+            Text(
+                text = if (isFilteredByShip) {
+                    "Menampilkan history untuk kapal KM-$query."
+                } else {
+                    "Menampilkan semua pengajuan yang sudah diproses (APPROVED/REJECTED)."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         item {
-            Button(onClick = onSearch) {
-                Text("Cari History")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Nomor kapal") },
+                    prefix = { Text("KM-") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                Button(
+                    onClick = onSearch,
+                    modifier = Modifier.height(56.dp)
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Cari")
+                }
             }
         }
 
         if (isLoading) {
-            item { CircularProgressIndicator() }
+            item { CenteredInlineLoading() }
         }
 
         if (!errorMessage.isNullOrBlank()) {
@@ -388,42 +524,262 @@ private fun AdminHistoryTab(
             }
         }
 
-        if (!isLoading && history.isEmpty()) {
-            item { Text("Data history belum tersedia.") }
+        if (!isLoading && orderedHistory.isEmpty()) {
+            item {
+                Text(
+                    text = if (isFilteredByShip) {
+                        "History kapal tidak ditemukan untuk nomor tersebut."
+                    } else {
+                        "Belum ada pengajuan yang sudah diproses."
+                    }
+                )
+            }
         }
 
-        items(history, key = { it.id }) { submission ->
+        items(orderedHistory, key = { it.id }) { submission ->
+            val inspectionData = inspectionDataBySubmission[submission.id] ?: SubmissionInspectionData()
+
             SubmissionSummaryCard(
                 submission = submission,
                 showValidationAction = false,
                 onDetail = onDetail
             )
+
+            if (submission.status.equals("APPROVED", ignoreCase = true)) {
+                AdminInspectionFormCard(
+                    submissionId = submission.id,
+                    inspectionData = inspectionData,
+                    onChecklistModeChange = onChecklistModeChange,
+                    onChecklistChoiceChange = onChecklistChoiceChange,
+                    onChecklistNoteChange = onChecklistNoteChange,
+                    onSummaryNoteChange = onSummaryNoteChange,
+                    onInspectionDocChange = onInspectionDocChange,
+                    onReplyDocChange = onReplyDocChange,
+                    onSaveInspection = onSaveInspection
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdminInspectionFormCard(
+    submissionId: String,
+    inspectionData: SubmissionInspectionData,
+    onChecklistModeChange: (submissionId: String, enabled: Boolean) -> Unit,
+    onChecklistChoiceChange: (submissionId: String, itemNumber: Int, choice: ChecklistChoice) -> Unit,
+    onChecklistNoteChange: (submissionId: String, itemNumber: Int, note: String) -> Unit,
+    onSummaryNoteChange: (submissionId: String, note: String) -> Unit,
+    onInspectionDocChange: (submissionId: String, fileName: String?, uriString: String?) -> Unit,
+    onReplyDocChange: (submissionId: String, fileName: String?, uriString: String?) -> Unit,
+    onSaveInspection: (submissionId: String) -> Unit
+) {
+    val context = LocalContext.current
+
+    val inspectionDocLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val fileName = uri?.let { getDisplayNameFromUri(context, it) ?: it.lastPathSegment }
+        onInspectionDocChange(submissionId, fileName, uri?.toString())
+    }
+    val replyDocLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
+        val fileName = uri?.let { getDisplayNameFromUri(context, it) ?: it.lastPathSegment }
+        onReplyDocChange(submissionId, fileName, uri?.toString())
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text("Hasil Cek Kapal", fontWeight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Gunakan form checklist")
+                Switch(
+                    checked = inspectionData.useChecklistForm,
+                    onCheckedChange = { checked -> onChecklistModeChange(submissionId, checked) }
+                )
+            }
+
+            if (inspectionData.useChecklistForm) {
+                inspectionData.checklistItems.forEach { item ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text("${item.number}. ${item.question}", style = MaterialTheme.typography.bodyMedium)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(
+                                    selected = item.choice == ChecklistChoice.YES,
+                                    onClick = {
+                                        onChecklistChoiceChange(submissionId, item.number, ChecklistChoice.YES)
+                                    }
+                                )
+                                Text("Ya")
+                                Spacer(modifier = Modifier.width(12.dp))
+                                RadioButton(
+                                    selected = item.choice == ChecklistChoice.NO,
+                                    onClick = {
+                                        onChecklistChoiceChange(submissionId, item.number, ChecklistChoice.NO)
+                                    }
+                                )
+                                Text("Tidak")
+                            }
+                            OutlinedTextField(
+                                value = item.note,
+                                onValueChange = { note ->
+                                    onChecklistNoteChange(submissionId, item.number, note)
+                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("Keterangan") },
+                                singleLine = true
+                            )
+                        }
+                    }
+                }
+            }
+
+            PickedDocumentField(
+                label = "Dokumen hasil cek",
+                fileName = inspectionData.inspectionDocName,
+                uriString = inspectionData.inspectionDocUri,
+                onPick = { inspectionDocLauncher.launch("application/pdf") }
+            )
+            PickedDocumentField(
+                label = "Surat balasan",
+                fileName = inspectionData.replyLetterDocName,
+                uriString = inspectionData.replyLetterDocUri,
+                onPick = { replyDocLauncher.launch("application/pdf") }
+            )
+
+            OutlinedTextField(
+                value = inspectionData.summaryNote,
+                onValueChange = { note -> onSummaryNoteChange(submissionId, note) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Catatan hasil cek") }
+            )
+
+            Button(
+                onClick = { onSaveInspection(submissionId) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Simpan Hasil Cek")
+            }
+
+            inspectionData.updatedAtMillis?.let { updatedAt ->
+                Text(
+                    text = "Terakhir disimpan: ${formatMillisDateTime(updatedAt)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickedDocumentField(
+    label: String,
+    fileName: String?,
+    uriString: String?,
+    onPick: () -> Unit
+) {
+    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val hasFile = !fileName.isNullOrBlank() && !uriString.isNullOrBlank()
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(label, fontWeight = FontWeight.Medium)
+                Text(
+                    text = fileName ?: "Belum memilih file",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (hasFile) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            OutlinedButton(onClick = onPick) {
+                Text("Pilih PDF")
+            }
+            OutlinedButton(
+                enabled = hasFile,
+                onClick = { uriString?.let { uriHandler.openUri(it) } }
+            ) {
+                Text("Buka")
+            }
         }
     }
 }
 
 @Composable
 private fun AdminLiveLocationTab(
+    modifier: Modifier,
     locations: List<ShipLocation>,
     isRefreshing: Boolean,
     errorMessage: String?,
     onRefresh: () -> Unit
 ) {
+    val nowMillis = rememberCurrentTimeMillis()
     val startPosition = LatLng(-6.1021, 106.8833)
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(startPosition, 11f)
     }
 
     var isMapLoaded by remember { mutableStateOf(false) }
+    var hasMapLoadTimedOut by remember { mutableStateOf(false) }
+    var mapLoadAttempt by remember { mutableStateOf(0) }
+
+    val requestRefresh: () -> Unit = {
+        hasMapLoadTimedOut = false
+        mapLoadAttempt += 1
+        onRefresh()
+    }
+
+    LaunchedEffect(isMapLoaded, mapLoadAttempt) {
+        if (isMapLoaded) {
+            hasMapLoadTimedOut = false
+            return@LaunchedEffect
+        }
+
+        hasMapLoadTimedOut = false
+        delay(12_000L)
+        if (!isMapLoaded) {
+            hasMapLoadTimedOut = true
+        }
+    }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = modifier.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        val activeCount = locations.count { isLocationActive(it.lastUpdatedAt) }
+        val activeCount = locations.count { isLocationActive(it.lastUpdatedAt, nowMillis = nowMillis) }
         Text("Kapal aktif: $activeCount/${locations.size}", fontWeight = FontWeight.SemiBold)
+        Text(
+            text = "Aktif dihitung dari update lokasi <= 5 menit terakhir.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -431,7 +787,7 @@ private fun AdminLiveLocationTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Live Location")
-            IconButton(onClick = onRefresh) {
+            IconButton(onClick = requestRefresh) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh lokasi")
             }
         }
@@ -458,7 +814,7 @@ private fun AdminLiveLocationTab(
             ) {
                 locations.forEach { ship ->
                     val shipPosition = LatLng(ship.latitude, ship.longitude)
-                    val activeLabel = if (isLocationActive(ship.lastUpdatedAt)) "Kapal aktif" else "Tidak aktif"
+                    val activeLabel = if (isLocationActive(ship.lastUpdatedAt, nowMillis = nowMillis)) "Kapal aktif" else "Tidak aktif"
                     Marker(
                         state = MarkerState(position = shipPosition),
                         title = "${ship.shipNumber} - ${ship.shipName}",
@@ -479,7 +835,33 @@ private fun AdminLiveLocationTab(
                         .background(MaterialTheme.colorScheme.background),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    if (hasMapLoadTimedOut) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Peta belum berhasil dimuat.",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Untuk build release, pastikan API key Maps mengizinkan package com.example.shipmonitoring + SHA-1 release.",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                OutlinedButton(onClick = requestRefresh) {
+                                    Text("Coba Lagi")
+                                }
+                            }
+                        }
+                    } else {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
 
@@ -513,15 +895,15 @@ private fun AdminLiveLocationTab(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(locations, key = { it.shipId }) { ship ->
-                AdminShipLocationInfoCard(ship)
+                AdminShipLocationInfoCard(ship = ship, nowMillis = nowMillis)
             }
         }
     }
 }
 
 @Composable
-private fun AdminShipLocationInfoCard(ship: ShipLocation) {
-    val isActive = isLocationActive(ship.lastUpdatedAt)
+private fun AdminShipLocationInfoCard(ship: ShipLocation, nowMillis: Long) {
+    val isActive = isLocationActive(ship.lastUpdatedAt, nowMillis = nowMillis)
     val statusText = if (isActive) "Kapal aktif" else "Status: Tidak Aktif"
 
     Card(
@@ -541,8 +923,13 @@ private fun AdminShipLocationInfoCard(ship: ShipLocation) {
             if (isActive) {
                 Text(statusText, color = MaterialTheme.colorScheme.primary)
             } else {
-                Text("$statusText (${relativeTimeLabel(ship.lastUpdatedAt)})", color = MaterialTheme.colorScheme.error)
+                Text("$statusText (${relativeTimeLabel(ship.lastUpdatedAt, nowMillis)})", color = MaterialTheme.colorScheme.error)
             }
         }
     }
+}
+
+private fun formatMillisDateTime(millis: Long): String {
+    val formatter = java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.forLanguageTag("id-ID"))
+    return formatter.format(java.util.Date(millis))
 }

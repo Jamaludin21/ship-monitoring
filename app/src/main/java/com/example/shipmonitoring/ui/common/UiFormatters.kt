@@ -53,15 +53,19 @@ fun statusLabel(status: String): String {
     }
 }
 
-fun isLocationActive(lastUpdatedAt: String?, staleMinutes: Long = 5L): Boolean {
+fun isLocationActive(
+    lastUpdatedAt: String?,
+    staleMinutes: Long = 5L,
+    nowMillis: Long = System.currentTimeMillis()
+): Boolean {
     val parsedDate = parseIsoDate(lastUpdatedAt) ?: return false
-    val diffMillis = abs(System.currentTimeMillis() - parsedDate.time)
+    val diffMillis = abs(nowMillis - parsedDate.time)
     return diffMillis <= staleMinutes * 60L * 1000L
 }
 
-fun relativeTimeLabel(lastUpdatedAt: String?): String {
+fun relativeTimeLabel(lastUpdatedAt: String?, nowMillis: Long = System.currentTimeMillis()): String {
     val parsedDate = parseIsoDate(lastUpdatedAt) ?: return "Tidak diketahui"
-    val diffMillis = System.currentTimeMillis() - parsedDate.time
+    val diffMillis = nowMillis - parsedDate.time
     if (diffMillis < 0L) return "Baru saja"
 
     val totalMinutes = diffMillis / (60L * 1000L)

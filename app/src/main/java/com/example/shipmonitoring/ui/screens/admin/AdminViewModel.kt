@@ -10,11 +10,13 @@ import com.example.shipmonitoring.data.model.SubmissionResponse
 import com.example.shipmonitoring.data.session.SessionManager
 import com.example.shipmonitoring.utils.extractErrorMessage
 import com.example.shipmonitoring.utils.toUserFriendlyNetworkMessage
+import com.example.shipmonitoring.utils.withKmPrefix
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -59,6 +61,9 @@ class AdminViewModel : ViewModel() {
     private val _actionState = MutableStateFlow<SubmissionActionState>(SubmissionActionState.Idle)
     val actionState: StateFlow<SubmissionActionState> = _actionState.asStateFlow()
 
+    private val _inspectionDataBySubmission = MutableStateFlow<Map<String, SubmissionInspectionData>>(emptyMap())
+    val inspectionDataBySubmission: StateFlow<Map<String, SubmissionInspectionData>> = _inspectionDataBySubmission.asStateFlow()
+
     private var pollingJob: Job? = null
 
     init {
@@ -91,7 +96,8 @@ class AdminViewModel : ViewModel() {
     }
 
     fun searchShipHistory(shipNumber: String) {
-        if (shipNumber.isBlank()) {
+        val normalizedShipNumber = withKmPrefix(shipNumber)
+        if (normalizedShipNumber.isBlank()) {
             _shipHistory.value = emptyList()
             _historyError.value = "Nomor kapal wajib diisi."
             return
@@ -102,7 +108,7 @@ class AdminViewModel : ViewModel() {
             _historyError.value = null
 
             try {
-                val response = apiService.getShipHistory(shipNumber.trim())
+                val response = apiService.getShipHistory(normalizedShipNumber)
                 if (response.isSuccessful) {
                     _shipHistory.value = response.body()?.data.orEmpty()
                 } else {
@@ -114,6 +120,12 @@ class AdminViewModel : ViewModel() {
                 _isHistoryLoading.value = false
             }
         }
+    }
+
+    fun clearHistorySearchState() {
+        _shipHistory.value = emptyList()
+        _historyError.value = null
+        _isHistoryLoading.value = false
     }
 
     fun refreshLocationOnce() {
@@ -136,7 +148,7 @@ class AdminViewModel : ViewModel() {
         }
     }
 
-    fun approveSubmission(id: String) {
+    fun approveSubmission(id: String, onSuccess: (() -> Unit)? = null) {
         viewModelScope.launch {
             _actionState.value = SubmissionActionState.Loading
 
@@ -147,6 +159,7 @@ class AdminViewModel : ViewModel() {
                         response.body()?.message ?: "Pengajuan berhasil disetujui"
                     )
                     refreshSubmissions()
+                    onSuccess?.invoke()
                 } else {
                     _actionState.value = SubmissionActionState.Error(
                         extractErrorMessage(response, "Gagal menyetujui pengajuan")
@@ -158,6 +171,70 @@ class AdminViewModel : ViewModel() {
                 )
             }
         }
+    }
+
+    fun upsertInspectionData(submissionId: String, updater: (SubmissionInspectionData) -> SubmissionInspectionData) {
+        _inspectionDataBySubmission.update { oldMap ->
+            val current = oldMap[submissionId] ?: SubmissionInspectionData()
+            oldMap + (submissionId to updater(current))
+        }
+    }
+
+    fun setChecklistMode(submissionId: String, enabled: Boolean) {
+        upsertInspectionData(submissionId) { data ->
+            data.copy(useChecklistForm = enabled)
+        }
+    }
+
+    fun updateChecklistChoice(submissionId: String, itemNumber: Int, choice: ChecklistChoice) {
+        upsertInspectionData(submissionId) { data ->
+            data.copy(
+                checklistItems = data.checklistItems.map { item ->
+                    if (item.number == itemNumber) item.copy(choice = choice) else item
+                }
+            )
+        }
+    }
+
+    fun updateChecklistNote(submissionId: String, itemNumber: Int, note: String) {
+        upsertInspectionData(submissionId) { data ->
+            data.copy(
+                checklistItems = data.checklistItems.map { item ->
+                    if (item.number == itemNumber) item.copy(note = note) else item
+                }
+            )
+        }
+    }
+
+    fun updateSummaryNote(submissionId: String, note: String) {
+        upsertInspectionData(submissionId) { data ->
+            data.copy(summaryNote = note)
+        }
+    }
+
+    fun updateInspectionDocument(submissionId: String, fileName: String?, uriString: String?) {
+        upsertInspectionData(submissionId) { data ->
+            data.copy(
+                inspectionDocName = fileName,
+                inspectionDocUri = uriString
+            )
+        }
+    }
+
+    fun updateReplyLetterDocument(submissionId: String, fileName: String?, uriString: String?) {
+        upsertInspectionData(submissionId) { data ->
+            data.copy(
+                replyLetterDocName = fileName,
+                replyLetterDocUri = uriString
+            )
+        }
+    }
+
+    fun saveInspectionData(submissionId: String) {
+        upsertInspectionData(submissionId) { data ->
+            data.copy(updatedAtMillis = System.currentTimeMillis())
+        }
+        _actionState.value = SubmissionActionState.Success("Hasil cek berhasil disimpan (sementara di aplikasi).")
     }
 
     fun rejectSubmission(id: String, reviewNote: String) {

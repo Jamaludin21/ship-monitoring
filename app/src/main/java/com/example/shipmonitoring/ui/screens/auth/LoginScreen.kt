@@ -1,5 +1,6 @@
 package com.example.shipmonitoring.ui.screens.auth
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -9,20 +10,23 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
+import com.example.shipmonitoring.R
 import com.example.shipmonitoring.data.model.UserData
+import com.example.shipmonitoring.ui.common.CenteredInlineLoading
 
 @Composable
 fun LoginScreen(
     viewModel: AuthViewModel,
     onLoginSuccess: (userData: UserData) -> Unit
 ) {
+    val logoSize = (LocalConfiguration.current.screenWidthDp * 0.30f).dp.coerceIn(96.dp, 144.dp)
+
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) } // State untuk show/hide password
@@ -42,17 +46,12 @@ fun LoginScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // 1. Logo Aplikasi dari URL (Cloudinary/Vercel)
-        // Ganti URL ini dengan URL logo kapal/kementerian Anda
-        val logoUrl = "https://a1epuokipdvggoec.public.blob.vercel-storage.com/WhatsApp_Image_2026-05-20_at_09.45.27-removebg-preview-9d0JaWXYNfkTJhOy4DVzttjLmEgr8S.png"
-
-        AsyncImage(
-            model = logoUrl,
+        // 1. Pakai asset logo custom dari resource lokal (bukan default Android Studio).
+        Image(
+            painter = painterResource(id = R.mipmap.ic_launcher_foreground),
             contentDescription = "Logo Aplikasi",
-            contentScale = ContentScale.Fit,
             modifier = Modifier
-                .size(120.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .size(logoSize)
         )
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -105,7 +104,7 @@ fun LoginScreen(
 
         // Reaktivitas Tombol Login
         if (authState is AuthState.Loading) {
-            CircularProgressIndicator()
+            CenteredInlineLoading()
         } else {
             Button(
                 onClick = { viewModel.login(username, password) },

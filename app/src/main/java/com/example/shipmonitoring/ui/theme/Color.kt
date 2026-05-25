@@ -2,10 +2,14 @@ package com.example.shipmonitoring.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
+val SeaBlue = Color(0xFF007A8C)
+val SeaBlueDark = Color(0xFF004F5C)
+val SeaBlueLight = Color(0xFFBFEFF7)
 
-val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
+val Aqua = Color(0xFF00A5BF)
+val AquaLight = Color(0xFFCFF8FF)
+
+val Sand = Color(0xFFFFF3D4)
+val Sky = Color(0xFFEAF9FF)
+val Coral = Color(0xFFE96C4A)
+val OnLight = Color(0xFF122127)

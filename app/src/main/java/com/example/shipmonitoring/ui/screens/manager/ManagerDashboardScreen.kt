@@ -16,10 +16,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ExitToApp
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Inbox
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,33 +33,38 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.shipmonitoring.data.model.ShipLocation
 import com.example.shipmonitoring.data.model.SubmissionResponse
+import com.example.shipmonitoring.ui.common.CenteredInlineLoading
+import com.example.shipmonitoring.ui.common.rememberCurrentTimeMillis
 import com.example.shipmonitoring.ui.common.SubmissionDetailDialog
 import com.example.shipmonitoring.ui.common.SubmissionSummaryCard
 import com.example.shipmonitoring.ui.common.formatDateTime
 import com.example.shipmonitoring.ui.common.isLocationActive
 import com.example.shipmonitoring.ui.common.relativeTimeLabel
+import com.example.shipmonitoring.utils.sanitizeShipNumberInput
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.GoogleMap
@@ -63,6 +74,13 @@ import com.google.maps.android.compose.MapUiSettings
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
+import kotlinx.coroutines.delay
+
+private enum class ManagerMenu(val label: String, val icon: ImageVector) {
+    PENGAJUAN("Pengajuan", Icons.Default.Inbox),
+    HISTORY("History", Icons.Default.History),
+    LOKASI("Lokasi", Icons.Default.LocationOn)
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,7 +88,7 @@ fun ManagerDashboardScreen(
     onLogout: () -> Unit,
     viewModel: ManagerViewModel = viewModel()
 ) {
-    var selectedTab by remember { mutableIntStateOf(0) }
+    var selectedMenu by rememberSaveable { mutableStateOf(ManagerMenu.PENGAJUAN.name) }
     var selectedSubmission by remember { mutableStateOf<SubmissionResponse?>(null) }
     var shipNumberQuery by remember { mutableStateOf("") }
 
@@ -86,14 +104,22 @@ fun ManagerDashboardScreen(
     val isRefreshingLocation by viewModel.isRefreshingLocation.collectAsState()
     val locationError by viewModel.locationError.collectAsState()
 
+    val reviewedSubmissions = remember(submissions) {
+        submissions.filterNot { it.status.equals("PENDING", ignoreCase = true) }
+    }
+    val isHistoryFilteredByShip = shipNumberQuery.isNotBlank()
+    val historyItems = if (isHistoryFilteredByShip) shipHistory else reviewedSubmissions
+    val historyLoadingState = if (isHistoryFilteredByShip) isHistoryLoading else isSubmissionsLoading
+    val historyErrorState = if (isHistoryFilteredByShip) historyError else submissionsError
+
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Dashboard Manager", fontWeight = FontWeight.Bold) },
+            CenterAlignedTopAppBar(
+                title = { Text("Manager", fontWeight = FontWeight.SemiBold) },
+                expandedHeight = 52.dp,
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary,
-                    actionIconContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 actions = {
                     IconButton(onClick = {
@@ -103,33 +129,25 @@ fun ManagerDashboardScreen(
                     }
                 }
             )
+        },
+        bottomBar = {
+            NavigationBar {
+                ManagerMenu.entries.forEach { menu ->
+                    NavigationBarItem(
+                        selected = selectedMenu == menu.name,
+                        onClick = { selectedMenu = menu.name },
+                        icon = { Icon(menu.icon, contentDescription = menu.label) },
+                        label = { Text(menu.label) }
+                    )
+                }
+            }
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-        ) {
-            PrimaryTabRow(selectedTabIndex = selectedTab) {
-                Tab(
-                    selected = selectedTab == 0,
-                    onClick = { selectedTab = 0 },
-                    text = { Text("Pengajuan Masuk") }
-                )
-                Tab(
-                    selected = selectedTab == 1,
-                    onClick = { selectedTab = 1 },
-                    text = { Text("History Kapal") }
-                )
-                Tab(
-                    selected = selectedTab == 2,
-                    onClick = { selectedTab = 2 },
-                    text = { Text("Live Location") }
-                )
-            }
-
-            when (selectedTab) {
-                0 -> SubmissionInboxTab(
+        when (ManagerMenu.valueOf(selectedMenu)) {
+            ManagerMenu.PENGAJUAN -> SubmissionInboxTab(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
                     submissions = submissions,
                     isLoading = isSubmissionsLoading,
                     errorMessage = submissionsError,
@@ -137,23 +155,49 @@ fun ManagerDashboardScreen(
                     onDetail = { selectedSubmission = it }
                 )
 
-                1 -> SubmissionHistoryTab(
+            ManagerMenu.HISTORY -> SubmissionHistoryTab(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
                     query = shipNumberQuery,
-                    onQueryChange = { shipNumberQuery = it },
-                    history = shipHistory,
-                    isLoading = isHistoryLoading,
-                    errorMessage = historyError,
-                    onSearch = { viewModel.searchShipHistory(shipNumberQuery) },
+                    onQueryChange = { input ->
+                        val sanitized = sanitizeShipNumberInput(input)
+                        shipNumberQuery = sanitized
+                        if (sanitized.isBlank()) {
+                            viewModel.clearHistorySearchState()
+                        }
+                    },
+                    history = historyItems,
+                    isLoading = historyLoadingState,
+                    errorMessage = historyErrorState,
+                    isFilteredByShip = isHistoryFilteredByShip,
+                    onSearch = {
+                        if (shipNumberQuery.isBlank()) {
+                            viewModel.clearHistorySearchState()
+                            viewModel.refreshSubmissions()
+                        } else {
+                            viewModel.searchShipHistory(shipNumberQuery)
+                        }
+                    },
+                    onRefresh = {
+                        if (shipNumberQuery.isBlank()) {
+                            viewModel.refreshSubmissions()
+                        } else {
+                            viewModel.searchShipHistory(shipNumberQuery)
+                        }
+                    },
                     onDetail = { selectedSubmission = it }
                 )
 
-                else -> LiveLocationTab(
+            ManagerMenu.LOKASI -> LiveLocationTab(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(paddingValues),
                     locations = locations,
                     isRefreshing = isRefreshingLocation,
                     errorMessage = locationError,
                     onRefresh = { viewModel.refreshLocationOnce() }
                 )
-            }
         }
     }
 
@@ -167,6 +211,7 @@ fun ManagerDashboardScreen(
 
 @Composable
 private fun SubmissionInboxTab(
+    modifier: Modifier,
     submissions: List<SubmissionResponse>,
     isLoading: Boolean,
     errorMessage: String?,
@@ -174,25 +219,32 @@ private fun SubmissionInboxTab(
     onDetail: (SubmissionResponse) -> Unit
 ) {
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Row(
+            Card(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
             ) {
-                Text("Pengajuan Masuk", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = onRefresh) {
-                    Icon(Icons.Default.Refresh, contentDescription = "Refresh submissions")
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Pengajuan Masuk", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = onRefresh) {
+                        Icon(Icons.Default.Refresh, contentDescription = "Refresh submissions")
+                    }
                 }
             }
         }
 
         if (isLoading) {
-            item { CircularProgressIndicator() }
+            item { CenteredInlineLoading() }
         }
 
         if (!errorMessage.isNullOrBlank()) {
@@ -221,41 +273,77 @@ private fun SubmissionInboxTab(
 
 @Composable
 private fun SubmissionHistoryTab(
+    modifier: Modifier,
     query: String,
     onQueryChange: (String) -> Unit,
     history: List<SubmissionResponse>,
     isLoading: Boolean,
     errorMessage: String?,
+    isFilteredByShip: Boolean,
     onSearch: () -> Unit,
+    onRefresh: () -> Unit,
     onDetail: (SubmissionResponse) -> Unit
 ) {
+    val orderedHistory = remember(history) { history.sortedByDescending { it.submittedAt } }
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            Text("History Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("History Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                IconButton(onClick = onRefresh) {
+                    Icon(Icons.Default.Refresh, contentDescription = "Refresh history")
+                }
+            }
         }
 
         item {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Search by nomor kapal") },
-                singleLine = true
+            Text(
+                text = if (isFilteredByShip) {
+                    "Menampilkan history untuk kapal KM-$query."
+                } else {
+                    "Menampilkan semua pengajuan yang sudah diproses (APPROVED/REJECTED)."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         item {
-            Button(onClick = onSearch) {
-                Text("Cari History")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.weight(1f),
+                    label = { Text("Nomor kapal") },
+                    prefix = { Text("KM-") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
+                Button(
+                    onClick = onSearch,
+                    modifier = Modifier.height(56.dp)
+                ) {
+                    Icon(Icons.Default.Search, contentDescription = null)
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Cari")
+                }
             }
         }
 
         if (isLoading) {
-            item { CircularProgressIndicator() }
+            item { CenteredInlineLoading() }
         }
 
         if (!errorMessage.isNullOrBlank()) {
@@ -268,11 +356,19 @@ private fun SubmissionHistoryTab(
             }
         }
 
-        if (!isLoading && history.isEmpty()) {
-            item { Text("Data history belum tersedia.") }
+        if (!isLoading && orderedHistory.isEmpty()) {
+            item {
+                Text(
+                    text = if (isFilteredByShip) {
+                        "History kapal tidak ditemukan untuk nomor tersebut."
+                    } else {
+                        "Belum ada pengajuan yang sudah diproses."
+                    }
+                )
+            }
         }
 
-        items(history, key = { it.id }) { submission ->
+        items(orderedHistory, key = { it.id }) { submission ->
             SubmissionSummaryCard(
                 submission = submission,
                 showValidationAction = false,
@@ -284,26 +380,52 @@ private fun SubmissionHistoryTab(
 
 @Composable
 private fun LiveLocationTab(
+    modifier: Modifier,
     locations: List<ShipLocation>,
     isRefreshing: Boolean,
     errorMessage: String?,
     onRefresh: () -> Unit
 ) {
+    val nowMillis = rememberCurrentTimeMillis()
     val startPosition = LatLng(-6.1021, 106.8833)
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(startPosition, 11f)
     }
 
     var isMapLoaded by remember { mutableStateOf(false) }
+    var hasMapLoadTimedOut by remember { mutableStateOf(false) }
+    var mapLoadAttempt by remember { mutableStateOf(0) }
+
+    val requestRefresh: () -> Unit = {
+        hasMapLoadTimedOut = false
+        mapLoadAttempt += 1
+        onRefresh()
+    }
+
+    LaunchedEffect(isMapLoaded, mapLoadAttempt) {
+        if (isMapLoaded) {
+            hasMapLoadTimedOut = false
+            return@LaunchedEffect
+        }
+
+        hasMapLoadTimedOut = false
+        delay(12_000L)
+        if (!isMapLoaded) {
+            hasMapLoadTimedOut = true
+        }
+    }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = modifier.padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        val activeCount = locations.count { isLocationActive(it.lastUpdatedAt) }
+        val activeCount = locations.count { isLocationActive(it.lastUpdatedAt, nowMillis = nowMillis) }
         Text("Kapal aktif: $activeCount/${locations.size}", fontWeight = FontWeight.SemiBold)
+        Text(
+            text = "Aktif dihitung dari update lokasi <= 5 menit terakhir.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -311,7 +433,7 @@ private fun LiveLocationTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Live Location")
-            IconButton(onClick = onRefresh) {
+            IconButton(onClick = requestRefresh) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh lokasi")
             }
         }
@@ -338,7 +460,7 @@ private fun LiveLocationTab(
             ) {
                 locations.forEach { ship ->
                     val shipPosition = LatLng(ship.latitude, ship.longitude)
-                    val activeLabel = if (isLocationActive(ship.lastUpdatedAt)) "Kapal aktif" else "Tidak aktif"
+                    val activeLabel = if (isLocationActive(ship.lastUpdatedAt, nowMillis = nowMillis)) "Kapal aktif" else "Tidak aktif"
                     Marker(
                         state = MarkerState(position = shipPosition),
                         title = "${ship.shipNumber} - ${ship.shipName}",
@@ -359,7 +481,33 @@ private fun LiveLocationTab(
                         .background(MaterialTheme.colorScheme.background),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    if (hasMapLoadTimedOut) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = "Peta belum berhasil dimuat.",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = "Untuk build release, pastikan API key Maps mengizinkan package com.example.shipmonitoring + SHA-1 release.",
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                androidx.compose.material3.OutlinedButton(onClick = requestRefresh) {
+                                    Text("Coba Lagi")
+                                }
+                            }
+                        }
+                    } else {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
                 }
             }
 
@@ -393,15 +541,15 @@ private fun LiveLocationTab(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             items(locations, key = { it.shipId }) { ship ->
-                ShipLocationInfoCard(ship)
+                ShipLocationInfoCard(ship = ship, nowMillis = nowMillis)
             }
         }
     }
 }
 
 @Composable
-private fun ShipLocationInfoCard(ship: ShipLocation) {
-    val isActive = isLocationActive(ship.lastUpdatedAt)
+private fun ShipLocationInfoCard(ship: ShipLocation, nowMillis: Long) {
+    val isActive = isLocationActive(ship.lastUpdatedAt, nowMillis = nowMillis)
     val statusText = if (isActive) "Kapal aktif" else "Status: Tidak Aktif"
 
     Card(
@@ -421,7 +569,7 @@ private fun ShipLocationInfoCard(ship: ShipLocation) {
             if (isActive) {
                 Text(statusText, color = MaterialTheme.colorScheme.primary)
             } else {
-                Text("$statusText (${relativeTimeLabel(ship.lastUpdatedAt)})", color = MaterialTheme.colorScheme.error)
+                Text("$statusText (${relativeTimeLabel(ship.lastUpdatedAt, nowMillis)})", color = MaterialTheme.colorScheme.error)
             }
         }
     }

@@ -1,7 +1,31 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
-    id("com.google.android.libraries.mapsplatform.secrets-gradle-plugin")
+}
+
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+val localPropertiesFile = rootProject.file("local.properties")
+val localProperties = Properties().apply {
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
+}
+
+fun requiredKeystoreProperty(name: String): String {
+    return keystoreProperties.getProperty(name)
+        ?: error("Missing '$name' in keystore.properties")
+}
+
+fun gradleOrLocalProperty(name: String): String? {
+    return providers.gradleProperty(name).orNull
+        ?: localProperties.getProperty(name)
 }
 
 android {
@@ -22,23 +46,45 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    val debugBaseUrl = providers
-        .gradleProperty("DEBUG_BASE_URL")
-        .orElse("http://10.0.2.2:3000/api/")
-    val releaseBaseUrl = providers
-        .gradleProperty("RELEASE_BASE_URL")
-        .orElse("https://ship-monitoring-be.vercel.app/api/")
+    val debugBaseUrl = gradleOrLocalProperty("DEBUG_BASE_URL")
+        ?: "http://10.0.2.2:3000/api/"
+    val releaseBaseUrl = gradleOrLocalProperty("RELEASE_BASE_URL")
+        ?: "https://ship-monitoring-be.vercel.app/api/"
+    val fallbackMapsApiKey = gradleOrLocalProperty("MAPS_API_KEY")
+        .orEmpty()
+    val debugMapsApiKey = gradleOrLocalProperty("MAPS_API_KEY_DEBUG")
+        ?.ifBlank { null }
+        ?: fallbackMapsApiKey
+    val releaseMapsApiKey = gradleOrLocalProperty("MAPS_API_KEY_RELEASE")
+        ?.ifBlank { null }
+        ?: fallbackMapsApiKey
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(requiredKeystoreProperty("storeFile"))
+                storePassword = requiredKeystoreProperty("storePassword")
+                keyAlias = requiredKeystoreProperty("keyAlias")
+                keyPassword = requiredKeystoreProperty("keyPassword")
+            }
+        }
+    }
 
     buildTypes {
         debug {
-            buildConfigField("String", "API_BASE_URL", "\"${debugBaseUrl.get()}\"")
+            buildConfigField("String", "API_BASE_URL", "\"$debugBaseUrl\"")
             // More secure than BODY: do not print payload by default.
             buildConfigField("String", "HTTP_LOG_LEVEL", "\"BASIC\"")
+            manifestPlaceholders["MAPS_API_KEY"] = debugMapsApiKey
         }
         release {
             isMinifyEnabled = false
-            buildConfigField("String", "API_BASE_URL", "\"${releaseBaseUrl.get()}\"")
+            buildConfigField("String", "API_BASE_URL", "\"$releaseBaseUrl\"")
             buildConfigField("String", "HTTP_LOG_LEVEL", "\"NONE\"")
+            manifestPlaceholders["MAPS_API_KEY"] = releaseMapsApiKey
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -81,8 +127,6 @@ dependencies {
     // Google Maps Compose (Untuk Manager melihat Peta)
     implementation("com.google.maps.android:maps-compose:4.3.0")
     implementation("com.google.android.gms:play-services-maps:18.2.0")
-    // Coil untuk memuat gambar dari URL URL
-    implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

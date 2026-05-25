@@ -9,6 +9,7 @@ import com.example.shipmonitoring.data.model.SubmissionResponse
 import com.example.shipmonitoring.data.session.SessionManager
 import com.example.shipmonitoring.utils.extractErrorMessage
 import com.example.shipmonitoring.utils.toUserFriendlyNetworkMessage
+import com.example.shipmonitoring.utils.withKmPrefix
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -76,7 +77,8 @@ class ManagerViewModel : ViewModel() {
     }
 
     fun searchShipHistory(shipNumber: String) {
-        if (shipNumber.isBlank()) {
+        val normalizedShipNumber = withKmPrefix(shipNumber)
+        if (normalizedShipNumber.isBlank()) {
             _shipHistory.value = emptyList()
             _historyError.value = "Nomor kapal wajib diisi."
             return
@@ -87,7 +89,7 @@ class ManagerViewModel : ViewModel() {
             _historyError.value = null
 
             try {
-                val response = apiService.getShipHistory(shipNumber.trim())
+                val response = apiService.getShipHistory(normalizedShipNumber)
                 if (response.isSuccessful) {
                     _shipHistory.value = response.body()?.data.orEmpty()
                 } else {
@@ -99,6 +101,12 @@ class ManagerViewModel : ViewModel() {
                 _isHistoryLoading.value = false
             }
         }
+    }
+
+    fun clearHistorySearchState() {
+        _shipHistory.value = emptyList()
+        _historyError.value = null
+        _isHistoryLoading.value = false
     }
 
     fun refreshLocationOnce() {

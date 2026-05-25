@@ -1,0 +1,15 @@
+## Copy this file to local.properties and adjust to your machine.
+## Do not commit local.properties.
+
+sdk.dir=/path/to/Android/Sdk
+
+## Optional shared key fallback (used when debug/release-specific keys are empty)
+MAPS_API_KEY=
+
+## Recommended: separate keys per variant
+MAPS_API_KEY_DEBUG=
+MAPS_API_KEY_RELEASE=
+
+## Optional backend overrides
+DEBUG_BASE_URL=http://10.0.2.2:3000/api/
+RELEASE_BASE_URL=https://ship-monitoring-be.vercel.app/api/
