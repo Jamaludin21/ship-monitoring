@@ -56,6 +56,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.shipmonitoring.data.model.ShipLocation
+import com.example.shipmonitoring.data.model.ShipSummaryResponse
 import com.example.shipmonitoring.data.model.SubmissionResponse
 import com.example.shipmonitoring.ui.common.CenteredInlineLoading
 import com.example.shipmonitoring.ui.common.rememberCurrentTimeMillis
@@ -64,6 +65,7 @@ import com.example.shipmonitoring.ui.common.SubmissionSummaryCard
 import com.example.shipmonitoring.ui.common.formatDateTime
 import com.example.shipmonitoring.ui.common.isLocationActive
 import com.example.shipmonitoring.ui.common.relativeTimeLabel
+import com.example.shipmonitoring.ui.common.statusLabel
 import com.example.shipmonitoring.utils.sanitizeShipNumberInput
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
@@ -103,6 +105,9 @@ fun ManagerDashboardScreen(
     val locations by viewModel.locations.collectAsState()
     val isRefreshingLocation by viewModel.isRefreshingLocation.collectAsState()
     val locationError by viewModel.locationError.collectAsState()
+    val ships by viewModel.ships.collectAsState()
+    val isShipsLoading by viewModel.isShipsLoading.collectAsState()
+    val shipsError by viewModel.shipsError.collectAsState()
 
     val reviewedSubmissions = remember(submissions) {
         submissions.filterNot { it.status.equals("PENDING", ignoreCase = true) }
@@ -152,7 +157,11 @@ fun ManagerDashboardScreen(
                     isLoading = isSubmissionsLoading,
                     errorMessage = submissionsError,
                     onRefresh = { viewModel.refreshSubmissions() },
-                    onDetail = { selectedSubmission = it }
+                    onDetail = { submission ->
+                        viewModel.openSubmissionDetail(submission) { latest ->
+                            selectedSubmission = latest
+                        }
+                    }
                 )
 
             ManagerMenu.HISTORY -> SubmissionHistoryTab(
@@ -186,7 +195,11 @@ fun ManagerDashboardScreen(
                             viewModel.searchShipHistory(shipNumberQuery)
                         }
                     },
-                    onDetail = { selectedSubmission = it }
+                    onDetail = { submission ->
+                        viewModel.openSubmissionDetail(submission) { latest ->
+                            selectedSubmission = latest
+                        }
+                    }
                 )
 
             ManagerMenu.LOKASI -> LiveLocationTab(
@@ -194,9 +207,15 @@ fun ManagerDashboardScreen(
                         .fillMaxSize()
                         .padding(paddingValues),
                     locations = locations,
+                    ships = ships,
                     isRefreshing = isRefreshingLocation,
+                    isShipsLoading = isShipsLoading,
                     errorMessage = locationError,
-                    onRefresh = { viewModel.refreshLocationOnce() }
+                    shipsError = shipsError,
+                    onRefresh = {
+                        viewModel.refreshLocationOnce()
+                        viewModel.refreshShips()
+                    }
                 )
         }
     }
@@ -236,7 +255,10 @@ private fun SubmissionInboxTab(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Pengajuan Masuk", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    IconButton(onClick = onRefresh) {
+                    IconButton(
+                        onClick = onRefresh,
+                        enabled = !isLoading
+                    ) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh submissions")
                     }
                 }
@@ -298,7 +320,10 @@ private fun SubmissionHistoryTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("History Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = onRefresh) {
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !isLoading
+                ) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh history")
                 }
             }
@@ -333,6 +358,7 @@ private fun SubmissionHistoryTab(
                 )
                 Button(
                     onClick = onSearch,
+                    enabled = !isLoading,
                     modifier = Modifier.height(56.dp)
                 ) {
                     Icon(Icons.Default.Search, contentDescription = null)
@@ -382,8 +408,11 @@ private fun SubmissionHistoryTab(
 private fun LiveLocationTab(
     modifier: Modifier,
     locations: List<ShipLocation>,
+    ships: List<ShipSummaryResponse>,
     isRefreshing: Boolean,
+    isShipsLoading: Boolean,
     errorMessage: String?,
+    shipsError: String?,
     onRefresh: () -> Unit
 ) {
     val nowMillis = rememberCurrentTimeMillis()
@@ -433,7 +462,10 @@ private fun LiveLocationTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Live Location")
-            IconButton(onClick = requestRefresh) {
+            IconButton(
+                onClick = requestRefresh,
+                enabled = !isRefreshing && !isShipsLoading
+            ) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh lokasi")
             }
         }
@@ -441,6 +473,14 @@ private fun LiveLocationTab(
         if (!errorMessage.isNullOrBlank()) {
             Text(
                 text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        if (!shipsError.isNullOrBlank()) {
+            Text(
+                text = shipsError,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -540,9 +580,67 @@ private fun LiveLocationTab(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                Text(
+                    text = "Semua Kapal (${ships.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            if (isShipsLoading) {
+                item { CenteredInlineLoading() }
+            }
+
+            if (!isShipsLoading && ships.isEmpty()) {
+                item {
+                    Text(
+                        text = "Data kapal tidak ditemukan.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            items(ships, key = { it.id }) { ship ->
+                ShipSummaryCard(ship = ship)
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Lokasi Kapal Aktif (${locations.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
             items(locations, key = { it.shipId }) { ship ->
                 ShipLocationInfoCard(ship = ship, nowMillis = nowMillis)
             }
+        }
+    }
+}
+
+@Composable
+private fun ShipSummaryCard(ship: ShipSummaryResponse) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("${ship.shipNumber} - ${ship.name}", fontWeight = FontWeight.SemiBold)
+            Text("Nahkoda: ${ship.captain?.name ?: "-"}")
+            Text("Lokasi terakhir: ${formatDateTime(ship.latestLocation?.createdAt)}")
+            val latestStatus = ship.latestSubmission?.status
+            Text(
+                text = "Pengajuan terakhir: ${if (latestStatus.isNullOrBlank()) "-" else statusLabel(latestStatus)}"
+            )
         }
     }
 }

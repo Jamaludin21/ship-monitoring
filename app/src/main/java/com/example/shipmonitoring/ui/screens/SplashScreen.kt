@@ -19,11 +19,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.shipmonitoring.R
+import com.example.shipmonitoring.data.api.AppContainer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 @Composable
 fun SplashScreen(
-    onNavigateToLogin: () -> Unit
+    onNavigateNext: (String) -> Unit
 ) {
     val logoSize = (LocalConfiguration.current.screenWidthDp * 0.45f).dp.coerceIn(180.dp, 260.dp)
 
@@ -44,8 +46,14 @@ fun SplashScreen(
         // 2. Tahan Splash Screen selama 2 detik
         delay(2000L)
 
-        // 3. Pindah ke halaman Login
-        onNavigateToLogin()
+        val session = AppContainer.sessionManager.sessionFlow.first()
+        val destination = when (session?.role?.uppercase()) {
+            "NAHKODA" -> "nahkoda_dashboard"
+            "MANAGER" -> "manager_dashboard"
+            "ADMIN" -> "admin_dashboard"
+            else -> "login"
+        }
+        onNavigateNext(destination)
     }
 
     // Antarmuka Splash Screen

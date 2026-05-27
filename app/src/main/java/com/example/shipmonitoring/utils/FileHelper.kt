@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
+import java.util.Locale
 
 fun getFileFromUri(context: Context, uri: Uri): File? {
     val contentResolver = context.contentResolver
@@ -65,4 +66,14 @@ fun getDisplayNameFromUri(context: Context, uri: Uri): String? {
         }
     }
     return null
+}
+
+fun isPdfUri(context: Context, uri: Uri): Boolean {
+    val mimeType = context.contentResolver.getType(uri)?.lowercase(Locale.US)
+    if (mimeType == "application/pdf") {
+        return true
+    }
+
+    val displayName = getDisplayNameFromUri(context, uri)?.lowercase(Locale.US)
+    return displayName?.endsWith(".pdf") == true
 }

@@ -9,8 +9,10 @@ class AuthInterceptor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val token = tokenProvider()
         val baseRequest = chain.request()
+        val path = baseRequest.url.encodedPath
+        val shouldAttachToken = !path.endsWith("/auth/login")
 
-        val request = if (!token.isNullOrBlank()) {
+        val request = if (shouldAttachToken && !token.isNullOrBlank()) {
             baseRequest
                 .newBuilder()
                 .header("Authorization", "Bearer $token")

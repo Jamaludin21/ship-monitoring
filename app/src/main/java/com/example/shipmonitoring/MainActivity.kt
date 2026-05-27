@@ -7,10 +7,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.example.shipmonitoring.data.api.AppContainer
 import com.example.shipmonitoring.ui.screens.SplashScreen
@@ -21,6 +28,7 @@ import com.example.shipmonitoring.ui.screens.manager.ManagerDashboardScreen
 import com.example.shipmonitoring.ui.screens.nahkoda.NahkodaDashboardScreen
 import com.example.shipmonitoring.ui.screens.nahkoda.NahkodaViewModel
 import com.example.shipmonitoring.ui.theme.ShipMonitoringTheme
+import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -31,6 +39,33 @@ class MainActivity : ComponentActivity() {
             ShipMonitoringTheme {
                 // Inisialisasi NavController untuk mengatur perpindahan layar
                 val navController = rememberNavController()
+                val currentBackStackEntry = navController.currentBackStackEntryAsState()
+                val currentRoute = currentBackStackEntry.value?.destination?.route
+                val session = AppContainer.sessionManager.sessionFlow.collectAsState(initial = null).value
+                var isSessionResolved by remember { mutableStateOf(false) }
+
+                LaunchedEffect(Unit) {
+                    AppContainer.sessionManager.sessionFlow.first()
+                    isSessionResolved = true
+                }
+
+                LaunchedEffect(session, currentRoute, isSessionResolved) {
+                    if (!isSessionResolved) {
+                        return@LaunchedEffect
+                    }
+
+                    if (session != null) {
+                        return@LaunchedEffect
+                    }
+
+                    if (currentRoute == null || currentRoute == "login" || currentRoute == "splash") {
+                        return@LaunchedEffect
+                    }
+
+                    navController.navigate("login") {
+                        popUpTo(0) { inclusive = true }
+                    }
+                }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
 
@@ -44,8 +79,8 @@ class MainActivity : ComponentActivity() {
                         // 1. Rute Splash Screen
                         composable("splash") {
                             SplashScreen(
-                                onNavigateToLogin = {
-                                    navController.navigate("login") {
+                                onNavigateNext = { destination ->
+                                    navController.navigate(destination) {
                                         // Hancurkan splash screen dari memori agar user tidak bisa 'Back' ke splash
                                         popUpTo("splash") { inclusive = true }
                                     }

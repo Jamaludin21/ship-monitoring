@@ -32,6 +32,8 @@ fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) } // State untuk show/hide password
 
     val authState by viewModel.authState.collectAsState()
+    val isLoading = authState is AuthState.Loading
+    val canSubmit = username.isNotBlank() && password.isNotBlank() && !isLoading
 
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
@@ -72,7 +74,10 @@ fun LoginScreen(
         // 2. Input Username
         OutlinedTextField(
             value = username,
-            onValueChange = { username = it },
+            onValueChange = {
+                username = it
+                viewModel.clearError()
+            },
             label = { Text("Username") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
@@ -84,7 +89,10 @@ fun LoginScreen(
         // 3. Input Password dengan Toggle Show/Hide
         OutlinedTextField(
             value = password,
-            onValueChange = { password = it },
+            onValueChange = {
+                password = it
+                viewModel.clearError()
+            },
             label = { Text("Password") },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
@@ -103,11 +111,12 @@ fun LoginScreen(
         Spacer(modifier = Modifier.height(32.dp))
 
         // Reaktivitas Tombol Login
-        if (authState is AuthState.Loading) {
+        if (isLoading) {
             CenteredInlineLoading()
         } else {
             Button(
                 onClick = { viewModel.login(username, password) },
+                enabled = canSubmit,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),

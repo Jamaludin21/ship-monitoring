@@ -16,9 +16,10 @@ object AppContainer {
             if (initialized) return
 
             sessionManager = SessionManager(context.applicationContext)
-            RetrofitClient.init {
-                sessionManager.currentToken()
-            }
+            RetrofitClient.init(
+                tokenProvider = { sessionManager.currentToken() },
+                unauthorizedHandler = { sessionManager.clearSessionAsync() }
+            )
 
             initialized = true
         }

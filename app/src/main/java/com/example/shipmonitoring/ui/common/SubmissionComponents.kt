@@ -1,5 +1,6 @@
 package com.example.shipmonitoring.ui.common
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -63,13 +65,16 @@ fun SubmissionSummaryCard(
     onApprove: ((SubmissionResponse) -> Unit)? = null,
     onReject: ((SubmissionResponse) -> Unit)? = null
 ) {
+    val shipNumber = submission.ship?.shipNumber ?: "-"
+    val shipName = submission.ship?.name ?: "-"
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
-                text = "${submission.ship.shipNumber} - ${submission.ship.name}",
+                text = "$shipNumber - $shipName",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold
             )
@@ -131,9 +136,12 @@ fun SubmissionDetailDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                val shipNumber = submission.ship?.shipNumber ?: "-"
+                val shipName = submission.ship?.name ?: "-"
+
                 Text("Data Kapal", fontWeight = FontWeight.SemiBold)
-                Text("Nomor Kapal: ${submission.ship.shipNumber}")
-                Text("Nama Kapal: ${submission.ship.name}")
+                Text("Nomor Kapal: $shipNumber")
+                Text("Nama Kapal: $shipName")
                 Text("Nama Nahkoda: ${submission.captainName}")
 
                 Text("Data Pengajuan", fontWeight = FontWeight.SemiBold)
@@ -154,9 +162,21 @@ fun SubmissionDetailDialog(
                 Text("Catatan admin: ${submission.reviewNote ?: "-"}")
                 Text("Tanggal review: ${formatDateTime(submission.reviewedAt)}")
 
+                submission.arrivalInspection?.let { inspection ->
+                    val yesCount = inspection.items.count { it.condition.equals("YES", ignoreCase = true) }
+                    val noCount = inspection.items.count { it.condition.equals("NO", ignoreCase = true) }
+
+                    Text("Hasil Cek Kedatangan", fontWeight = FontWeight.SemiBold)
+                    Text("Tanggal cek: ${formatDateTime(inspection.checkedAt)}")
+                    Text("Catatan cek: ${inspection.note ?: "-"}")
+                    Text("Checklist: YA $yesCount / TIDAK $noCount")
+                    DocumentLinkButton("Dokumen hasil cek", inspection.inspectionDocumentUrl.orEmpty())
+                    DocumentLinkButton("Surat balasan", inspection.responseLetterUrl.orEmpty())
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "Semua tombol dokumen akan membuka browser/PDF viewer.",
+                    text = "URL dokumen dapat kedaluwarsa, muat ulang detail jika dokumen gagal dibuka.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -168,6 +188,7 @@ fun SubmissionDetailDialog(
 @Composable
 private fun DocumentLinkButton(label: String, url: String) {
     val uriHandler = LocalUriHandler.current
+    val context = LocalContext.current
     val canOpen = url.isNotBlank()
 
     Row(
@@ -183,7 +204,17 @@ private fun DocumentLinkButton(label: String, url: String) {
             enabled = canOpen,
             onClick = {
                 if (canOpen) {
-                    uriHandler.openUri(url)
+                    val opened = runCatching {
+                        uriHandler.openUri(url)
+                    }.isSuccess
+
+                    if (!opened) {
+                        Toast.makeText(
+                            context,
+                            "Gagal membuka dokumen. Muat ulang detail untuk mendapatkan URL terbaru.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                 }
             }
         ) {

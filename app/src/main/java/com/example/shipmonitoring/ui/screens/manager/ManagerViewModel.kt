@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.shipmonitoring.data.api.ApiService
 import com.example.shipmonitoring.data.api.AppContainer
 import com.example.shipmonitoring.data.model.ShipLocation
+import com.example.shipmonitoring.data.model.ShipSummaryResponse
 import com.example.shipmonitoring.data.model.SubmissionResponse
 import com.example.shipmonitoring.data.session.SessionManager
 import com.example.shipmonitoring.utils.extractErrorMessage
@@ -49,14 +50,26 @@ class ManagerViewModel : ViewModel() {
     private val _locationError = MutableStateFlow<String?>(null)
     val locationError: StateFlow<String?> = _locationError.asStateFlow()
 
+    private val _ships = MutableStateFlow<List<ShipSummaryResponse>>(emptyList())
+    val ships: StateFlow<List<ShipSummaryResponse>> = _ships.asStateFlow()
+
+    private val _isShipsLoading = MutableStateFlow(false)
+    val isShipsLoading: StateFlow<Boolean> = _isShipsLoading.asStateFlow()
+
+    private val _shipsError = MutableStateFlow<String?>(null)
+    val shipsError: StateFlow<String?> = _shipsError.asStateFlow()
+
     private var pollingJob: Job? = null
 
     init {
         refreshSubmissions()
+        refreshShips()
         startLocationPolling()
     }
 
     fun refreshSubmissions() {
+        if (_isSubmissionsLoading.value) return
+
         viewModelScope.launch {
             _isSubmissionsLoading.value = true
             _submissionsError.value = null
@@ -77,6 +90,8 @@ class ManagerViewModel : ViewModel() {
     }
 
     fun searchShipHistory(shipNumber: String) {
+        if (_isHistoryLoading.value) return
+
         val normalizedShipNumber = withKmPrefix(shipNumber)
         if (normalizedShipNumber.isBlank()) {
             _shipHistory.value = emptyList()
@@ -93,6 +108,10 @@ class ManagerViewModel : ViewModel() {
                 if (response.isSuccessful) {
                     _shipHistory.value = response.body()?.data.orEmpty()
                 } else {
+                    if (response.code() == 409) {
+                        _historyError.value = "Nomor kapal terlalu umum. Gunakan nomor kapal lengkap, contoh: KM-001."
+                        return@launch
+                    }
                     _historyError.value = extractErrorMessage(response, "Gagal memuat history kapal")
                 }
             } catch (e: Exception) {
@@ -110,6 +129,8 @@ class ManagerViewModel : ViewModel() {
     }
 
     fun refreshLocationOnce() {
+        if (_isRefreshingLocation.value) return
+
         viewModelScope.launch {
             _isRefreshingLocation.value = true
             _locationError.value = null
@@ -129,12 +150,53 @@ class ManagerViewModel : ViewModel() {
         }
     }
 
+    fun refreshShips() {
+        if (_isShipsLoading.value) return
+
+        viewModelScope.launch {
+            _isShipsLoading.value = true
+            _shipsError.value = null
+
+            try {
+                val response = apiService.getShips()
+                if (response.isSuccessful) {
+                    _ships.value = response.body()?.data.orEmpty()
+                } else {
+                    _shipsError.value = extractErrorMessage(response, "Gagal memuat data kapal")
+                }
+            } catch (e: Exception) {
+                _shipsError.value = toUserFriendlyNetworkMessage(e)
+            } finally {
+                _isShipsLoading.value = false
+            }
+        }
+    }
+
     private fun startLocationPolling() {
         pollingJob?.cancel()
         pollingJob = viewModelScope.launch {
             while (isActive) {
                 refreshLocationOnce()
                 delay(10_000L)
+            }
+        }
+    }
+
+    fun openSubmissionDetail(
+        fallback: SubmissionResponse,
+        onReady: (SubmissionResponse) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.getSubmissionDetail(fallback.id)
+                val detailed = response.body()?.data
+                if (response.isSuccessful && detailed != null) {
+                    onReady(detailed)
+                } else {
+                    onReady(fallback)
+                }
+            } catch (_: Exception) {
+                onReady(fallback)
             }
         }
     }

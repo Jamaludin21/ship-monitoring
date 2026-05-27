@@ -118,4 +118,10 @@ class SessionManager(context: Context) {
     suspend fun clearSession() {
         appContext.sessionDataStore.edit { it.clear() }
     }
+
+    fun clearSessionAsync() {
+        scope.launch {
+            clearSession()
+        }
+    }
 }

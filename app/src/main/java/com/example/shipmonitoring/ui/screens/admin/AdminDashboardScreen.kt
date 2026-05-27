@@ -1,6 +1,7 @@
 package com.example.shipmonitoring.ui.screens.admin
 
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.fadeIn
@@ -65,6 +66,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.shipmonitoring.data.model.ShipLocation
+import com.example.shipmonitoring.data.model.ShipSummaryResponse
 import com.example.shipmonitoring.data.model.SubmissionResponse
 import com.example.shipmonitoring.ui.common.CenteredInlineLoading
 import com.example.shipmonitoring.ui.common.rememberCurrentTimeMillis
@@ -73,6 +75,7 @@ import com.example.shipmonitoring.ui.common.SubmissionSummaryCard
 import com.example.shipmonitoring.ui.common.formatDateTime
 import com.example.shipmonitoring.ui.common.isLocationActive
 import com.example.shipmonitoring.ui.common.relativeTimeLabel
+import com.example.shipmonitoring.ui.common.statusLabel
 import com.example.shipmonitoring.utils.getDisplayNameFromUri
 import com.example.shipmonitoring.utils.sanitizeShipNumberInput
 import com.google.android.gms.maps.model.CameraPosition
@@ -98,6 +101,7 @@ fun AdminDashboardScreen(
     onLogout: () -> Unit,
     viewModel: AdminViewModel = viewModel()
 ) {
+    val context = LocalContext.current
     var selectedMenu by rememberSaveable { mutableStateOf(AdminMenu.VALIDASI.name) }
     var selectedSubmission by remember { mutableStateOf<SubmissionResponse?>(null) }
     var shipNumberQuery by remember { mutableStateOf("") }
@@ -118,6 +122,9 @@ fun AdminDashboardScreen(
     val locations by viewModel.locations.collectAsState()
     val isRefreshingLocation by viewModel.isRefreshingLocation.collectAsState()
     val locationError by viewModel.locationError.collectAsState()
+    val ships by viewModel.ships.collectAsState()
+    val isShipsLoading by viewModel.isShipsLoading.collectAsState()
+    val shipsError by viewModel.shipsError.collectAsState()
 
     val actionState by viewModel.actionState.collectAsState()
     val inspectionDataBySubmission by viewModel.inspectionDataBySubmission.collectAsState()
@@ -180,7 +187,11 @@ fun AdminDashboardScreen(
                     onTogglePending = { showPendingOnly = it },
                     onRefresh = { viewModel.refreshSubmissions() },
                     onDismissMessage = { viewModel.resetActionState() },
-                    onDetail = { selectedSubmission = it },
+                    onDetail = { submission ->
+                        viewModel.openSubmissionDetail(submission) { latest ->
+                            selectedSubmission = latest
+                        }
+                    },
                     onApprove = { approveTarget = it },
                     onReject = {
                         rejectTarget = it
@@ -220,7 +231,11 @@ fun AdminDashboardScreen(
                             viewModel.searchShipHistory(shipNumberQuery)
                         }
                     },
-                    onDetail = { selectedSubmission = it },
+                    onDetail = { submission ->
+                        viewModel.openSubmissionDetail(submission) { latest ->
+                            selectedSubmission = latest
+                        }
+                    },
                     onChecklistModeChange = { submissionId, enabled ->
                         viewModel.setChecklistMode(submissionId, enabled)
                     },
@@ -240,7 +255,7 @@ fun AdminDashboardScreen(
                         viewModel.updateReplyLetterDocument(submissionId, fileName, uriString)
                     },
                     onSaveInspection = { submissionId ->
-                        viewModel.saveInspectionData(submissionId)
+                        viewModel.saveInspectionData(submissionId, context)
                     }
                 )
 
@@ -249,9 +264,15 @@ fun AdminDashboardScreen(
                         .fillMaxSize()
                         .padding(paddingValues),
                     locations = locations,
+                    ships = ships,
                     isRefreshing = isRefreshingLocation,
+                    isShipsLoading = isShipsLoading,
                     errorMessage = locationError,
-                    onRefresh = { viewModel.refreshLocationOnce() }
+                    shipsError = shipsError,
+                    onRefresh = {
+                        viewModel.refreshLocationOnce()
+                        viewModel.refreshShips()
+                    }
                 )
         }
     }
@@ -269,15 +290,20 @@ fun AdminDashboardScreen(
             title = { Text("Konfirmasi") },
             text = { Text("Apakah Anda yakin ingin menyetujui pengajuan ini?") },
             confirmButton = {
-                Button(onClick = {
-                    val approvedShipNumber = submission.ship.shipNumber
-                    viewModel.approveSubmission(submission.id) {
-                        selectedMenu = AdminMenu.HISTORY.name
-                        shipNumberQuery = sanitizeShipNumberInput(approvedShipNumber)
-                        viewModel.searchShipHistory(approvedShipNumber)
+                Button(
+                    enabled = actionState !is SubmissionActionState.Loading,
+                    onClick = {
+                        val approvedShipNumber = submission.ship?.shipNumber.orEmpty()
+                        viewModel.approveSubmission(submission.id) {
+                            if (approvedShipNumber.isNotBlank()) {
+                                selectedMenu = AdminMenu.HISTORY.name
+                                shipNumberQuery = sanitizeShipNumberInput(approvedShipNumber)
+                                viewModel.searchShipHistory(approvedShipNumber)
+                            }
+                        }
+                        approveTarget = null
                     }
-                    approveTarget = null
-                }) {
+                ) {
                     Text("Setujui")
                 }
             },
@@ -302,12 +328,15 @@ fun AdminDashboardScreen(
                 )
             },
             confirmButton = {
-                Button(onClick = {
-                    viewModel.rejectSubmission(submission.id, rejectReason)
-                    if (rejectReason.isNotBlank()) {
-                        rejectTarget = null
+                Button(
+                    enabled = actionState !is SubmissionActionState.Loading,
+                    onClick = {
+                        viewModel.rejectSubmission(submission.id, rejectReason)
+                        if (rejectReason.isNotBlank()) {
+                            rejectTarget = null
+                        }
                     }
-                }) {
+                ) {
                     Text("Tolak Pengajuan")
                 }
             },
@@ -364,7 +393,10 @@ private fun ValidationTab(
                         Text("Pending", style = MaterialTheme.typography.bodySmall)
                         Spacer(modifier = Modifier.width(4.dp))
                         Switch(checked = showPendingOnly, onCheckedChange = onTogglePending)
-                        IconButton(onClick = onRefresh) {
+                        IconButton(
+                            onClick = onRefresh,
+                            enabled = !isLoading && actionState !is SubmissionActionState.Loading
+                        ) {
                             Icon(Icons.Default.Refresh, contentDescription = "Refresh submissions")
                         }
                     }
@@ -466,7 +498,10 @@ private fun AdminHistoryTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("History Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = onRefresh) {
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !isLoading
+                ) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh history")
                 }
             }
@@ -501,6 +536,7 @@ private fun AdminHistoryTab(
                 )
                 Button(
                     onClick = onSearch,
+                    enabled = !isLoading,
                     modifier = Modifier.height(56.dp)
                 ) {
                     Icon(Icons.Default.Search, contentDescription = null)
@@ -698,6 +734,7 @@ private fun PickedDocumentField(
     onPick: () -> Unit
 ) {
     val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+    val context = LocalContext.current
     val hasFile = !fileName.isNullOrBlank() && !uriString.isNullOrBlank()
 
     Card(
@@ -724,7 +761,19 @@ private fun PickedDocumentField(
             }
             OutlinedButton(
                 enabled = hasFile,
-                onClick = { uriString?.let { uriHandler.openUri(it) } }
+                onClick = {
+                    val opened = runCatching {
+                        uriString?.let { uriHandler.openUri(it) }
+                    }.isSuccess
+
+                    if (!opened) {
+                        Toast.makeText(
+                            context,
+                            "Gagal membuka dokumen. Coba muat ulang data.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             ) {
                 Text("Buka")
             }
@@ -736,8 +785,11 @@ private fun PickedDocumentField(
 private fun AdminLiveLocationTab(
     modifier: Modifier,
     locations: List<ShipLocation>,
+    ships: List<ShipSummaryResponse>,
     isRefreshing: Boolean,
+    isShipsLoading: Boolean,
     errorMessage: String?,
+    shipsError: String?,
     onRefresh: () -> Unit
 ) {
     val nowMillis = rememberCurrentTimeMillis()
@@ -787,7 +839,10 @@ private fun AdminLiveLocationTab(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text("Live Location")
-            IconButton(onClick = requestRefresh) {
+            IconButton(
+                onClick = requestRefresh,
+                enabled = !isRefreshing && !isShipsLoading
+            ) {
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh lokasi")
             }
         }
@@ -795,6 +850,14 @@ private fun AdminLiveLocationTab(
         if (!errorMessage.isNullOrBlank()) {
             Text(
                 text = errorMessage,
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+
+        if (!shipsError.isNullOrBlank()) {
+            Text(
+                text = shipsError,
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall
             )
@@ -894,9 +957,67 @@ private fun AdminLiveLocationTab(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
+            item {
+                Text(
+                    text = "Semua Kapal (${ships.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            if (isShipsLoading) {
+                item { CenteredInlineLoading() }
+            }
+
+            if (!isShipsLoading && ships.isEmpty()) {
+                item {
+                    Text(
+                        text = "Data kapal tidak ditemukan.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            items(ships, key = { it.id }) { ship ->
+                AdminShipSummaryCard(ship = ship)
+            }
+
+            item {
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Lokasi Kapal Aktif (${locations.size})",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
             items(locations, key = { it.shipId }) { ship ->
                 AdminShipLocationInfoCard(ship = ship, nowMillis = nowMillis)
             }
+        }
+    }
+}
+
+@Composable
+private fun AdminShipSummaryCard(ship: ShipSummaryResponse) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text("${ship.shipNumber} - ${ship.name}", fontWeight = FontWeight.SemiBold)
+            Text("Nahkoda: ${ship.captain?.name ?: "-"}")
+            Text("Lokasi terakhir: ${formatDateTime(ship.latestLocation?.createdAt)}")
+            val latestStatus = ship.latestSubmission?.status
+            Text(
+                text = "Pengajuan terakhir: ${if (latestStatus.isNullOrBlank()) "-" else statusLabel(latestStatus)}"
+            )
         }
     }
 }

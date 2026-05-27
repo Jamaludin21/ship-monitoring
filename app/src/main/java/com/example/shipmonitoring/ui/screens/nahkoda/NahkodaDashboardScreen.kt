@@ -80,6 +80,7 @@ fun NahkodaDashboardScreen(
     val profile by viewModel.profile.collectAsState()
     val submissionState by viewModel.submissionState.collectAsState()
     val isTrackingLive by viewModel.isTrackingLive.collectAsState()
+    val hasSentLocation by viewModel.hasSentLocation.collectAsState()
 
     val history by viewModel.history.collectAsState()
     val isHistoryLoading by viewModel.isHistoryLoading.collectAsState()
@@ -133,7 +134,8 @@ fun NahkodaDashboardScreen(
 
     val employeeValid = employeeCount.toIntOrNull()?.let { it > 0 } == true
     val isFormValid =
-        isTrackingLive &&
+        profile.hasShip &&
+            hasSentLocation &&
             captainName.isNotBlank() &&
             employeeValid &&
             cargo.isNotBlank() &&
@@ -181,6 +183,7 @@ fun NahkodaDashboardScreen(
                     .padding(paddingValues),
                 profile = profile,
                 isTrackingLive = isTrackingLive,
+                hasSentLocation = hasSentLocation,
                 submissionState = submissionState,
                 captainName = captainName,
                 employeeCount = employeeCount,
@@ -244,7 +247,11 @@ fun NahkodaDashboardScreen(
                 isHistoryLoading = isHistoryLoading,
                 historyError = historyError,
                 onRefresh = { viewModel.loadMySubmissionHistory() },
-                onDetail = { selectedHistorySubmission = it }
+                onDetail = { submission ->
+                    viewModel.openSubmissionDetail(submission) { latest ->
+                        selectedHistorySubmission = latest
+                    }
+                }
             )
 
             NahkodaMenu.PROFIL -> NahkodaProfilTab(
@@ -270,6 +277,7 @@ private fun NahkodaPengajuanTab(
     modifier: Modifier,
     profile: NahkodaProfile,
     isTrackingLive: Boolean,
+    hasSentLocation: Boolean,
     submissionState: SubmissionState,
     captainName: String,
     employeeCount: String,
@@ -332,7 +340,8 @@ private fun NahkodaPengajuanTab(
                     }
                     Switch(
                         checked = isTrackingLive,
-                        onCheckedChange = onToggleTracking
+                        onCheckedChange = onToggleTracking,
+                        enabled = profile.hasShip
                     )
                 }
             }
@@ -355,6 +364,14 @@ private fun NahkodaPengajuanTab(
                     Text("Nama Kapal: ${profile.shipName ?: "-"}")
 
                     HorizontalDivider()
+
+                    if (!profile.hasShip) {
+                        Text(
+                            text = "Kapal belum terdaftar. Hubungi admin untuk menambahkan kapal Anda.",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
 
                     OutlinedTextField(
                         value = captainName,
@@ -407,9 +424,9 @@ private fun NahkodaPengajuanTab(
                         onPick = onPickRadioStationPermit
                     )
 
-                    if (!isTrackingLive) {
+                    if (!hasSentLocation) {
                         Text(
-                            text = "Aktifkan live location terlebih dahulu sebelum mengirim pengajuan.",
+                            text = "Aktifkan live location minimal sekali sebelum mengirim pengajuan.",
                             color = MaterialTheme.colorScheme.error,
                             style = MaterialTheme.typography.bodySmall
                         )
@@ -480,7 +497,10 @@ private fun NahkodaHistoryTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("Riwayat Pengajuan Kapal", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = onRefresh) {
+                IconButton(
+                    onClick = onRefresh,
+                    enabled = !isHistoryLoading
+                ) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh history")
                 }
             }

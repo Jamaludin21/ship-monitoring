@@ -14,6 +14,7 @@ import com.example.shipmonitoring.utils.LocationClient
 import com.example.shipmonitoring.utils.extractErrorMessage
 import com.example.shipmonitoring.utils.getFileFromUri
 import com.example.shipmonitoring.utils.getFileSizeFromUri
+import com.example.shipmonitoring.utils.isPdfUri
 import com.example.shipmonitoring.utils.toUserFriendlyNetworkMessage
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,7 +35,8 @@ data class NahkodaProfile(
     val userName: String = "",
     val shipId: String? = null,
     val shipNumber: String? = null,
-    val shipName: String? = null
+    val shipName: String? = null,
+    val hasShip: Boolean = false
 )
 
 sealed class SubmissionState {
@@ -67,8 +69,12 @@ class NahkodaViewModel : ViewModel() {
     private val _isTrackingLive = MutableStateFlow(false)
     val isTrackingLive: StateFlow<Boolean> = _isTrackingLive.asStateFlow()
 
+    private val _hasSentLocation = MutableStateFlow(false)
+    val hasSentLocation: StateFlow<Boolean> = _hasSentLocation.asStateFlow()
+
     init {
         observeSession()
+        refreshMyShips()
         loadMySubmissionHistory()
     }
 
@@ -82,7 +88,8 @@ class NahkodaViewModel : ViewModel() {
                         userName = session.userName,
                         shipId = session.shipId,
                         shipNumber = session.shipNumber,
-                        shipName = session.shipName
+                        shipName = session.shipName,
+                        hasShip = !session.shipId.isNullOrBlank()
                     )
                 }
             }
@@ -94,9 +101,8 @@ class NahkodaViewModel : ViewModel() {
     }
 
     fun startLiveLocation(context: Context) {
-        val shipId = profile.value.shipId
-        if (shipId.isNullOrBlank()) {
-            _submissionState.value = SubmissionState.Error("Data kapal tidak ditemukan. Silakan login ulang.")
+        if (!profile.value.hasShip) {
+            _submissionState.value = SubmissionState.Error("Kapal belum terdaftar untuk akun ini.")
             return
         }
 
@@ -111,7 +117,7 @@ class NahkodaViewModel : ViewModel() {
                 _submissionState.value = SubmissionState.Error("Gagal mengambil lokasi real-time.")
             }
             .onEach { location: Location ->
-                sendLocation(shipId, location)
+                sendLocation(location)
             }
             .launchIn(viewModelScope)
     }
@@ -122,10 +128,13 @@ class NahkodaViewModel : ViewModel() {
         locationJob = null
     }
 
-    private suspend fun sendLocation(shipId: String, location: Location) {
+    private suspend fun sendLocation(location: Location) {
         try {
-            val req = UpdateLocationRequest(shipId, location.latitude, location.longitude)
-            apiService.updateLocation(req)
+            val req = UpdateLocationRequest(location.latitude, location.longitude)
+            val response = apiService.updateLocation(req)
+            if (response.isSuccessful) {
+                _hasSentLocation.value = true
+            }
         } catch (_: Exception) {
             // Keep tracking alive even if one request fails.
         }
@@ -214,19 +223,21 @@ class NahkodaViewModel : ViewModel() {
     }
 
     private fun validatePdf(uri: Uri, context: Context) {
-        val mimeType = context.contentResolver.getType(uri)?.lowercase()
-        if (mimeType != "application/pdf") {
+        if (!isPdfUri(context, uri)) {
             throw IllegalArgumentException("Semua dokumen wajib berformat PDF.")
         }
 
         val size = getFileSizeFromUri(context, uri)
-        val maxSize = 5L * 1024L * 1024L
+        val maxSize = 4L * 1024L * 1024L
+        val maxSizeMessage = "Ukuran file maksimal 4 MB untuk setiap dokumen."
         if (size != null && size > maxSize) {
-            throw IllegalArgumentException("Ukuran file maksimal 5 MB untuk setiap dokumen.")
+            throw IllegalArgumentException(maxSizeMessage)
         }
     }
 
     fun loadMySubmissionHistory() {
+        if (_isHistoryLoading.value) return
+
         viewModelScope.launch {
             _isHistoryLoading.value = true
             _historyError.value = null
@@ -242,6 +253,49 @@ class NahkodaViewModel : ViewModel() {
                 _historyError.value = toUserFriendlyNetworkMessage(e)
             } finally {
                 _isHistoryLoading.value = false
+            }
+        }
+    }
+
+    fun refreshMyShips() {
+        viewModelScope.launch {
+            try {
+                val response = apiService.getMyShips()
+                if (!response.isSuccessful) {
+                    return@launch
+                }
+
+                val ship = response.body()?.data.orEmpty().firstOrNull()
+                _profile.value = _profile.value.copy(
+                    shipId = ship?.id,
+                    shipNumber = ship?.shipNumber,
+                    shipName = ship?.name,
+                    hasShip = ship != null
+                )
+                if (ship?.latestLocation != null) {
+                    _hasSentLocation.value = true
+                }
+            } catch (_: Exception) {
+                // Keep session-derived profile as fallback when request fails.
+            }
+        }
+    }
+
+    fun openSubmissionDetail(
+        fallback: SubmissionResponse,
+        onReady: (SubmissionResponse) -> Unit
+    ) {
+        viewModelScope.launch {
+            try {
+                val response = apiService.getSubmissionDetail(fallback.id)
+                val detailed = response.body()?.data
+                if (response.isSuccessful && detailed != null) {
+                    onReady(detailed)
+                } else {
+                    onReady(fallback)
+                }
+            } catch (_: Exception) {
+                onReady(fallback)
             }
         }
     }

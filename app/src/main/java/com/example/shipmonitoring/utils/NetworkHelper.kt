@@ -25,7 +25,20 @@ fun <T> extractErrorMessage(response: Response<T>, fallback: String): String {
         }
     }
 
-    return "$fallback (HTTP $code)"
+    val defaultMessage = when (code) {
+        400 -> "Permintaan tidak valid."
+        401 -> "Sesi login berakhir. Silakan login ulang."
+        403 -> "Akses ditolak untuk fitur ini."
+        404 -> "Data tidak ditemukan."
+        409 -> "Terjadi konflik data. Silakan periksa input Anda."
+        else -> null
+    }
+
+    return if (defaultMessage != null) {
+        "$defaultMessage (HTTP $code)"
+    } else {
+        "$fallback (HTTP $code)"
+    }
 }
 
 fun toUserFriendlyNetworkMessage(error: Throwable): String {

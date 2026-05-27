@@ -7,6 +7,7 @@ import com.example.shipmonitoring.data.api.AppContainer
 import com.example.shipmonitoring.data.model.LoginRequest
 import com.example.shipmonitoring.data.model.UserData
 import com.example.shipmonitoring.data.session.SessionManager
+import com.example.shipmonitoring.utils.extractErrorMessage
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -27,10 +28,18 @@ class AuthViewModel : ViewModel() {
     val authState: StateFlow<AuthState> = _authState
 
     fun login(username: String, password: String) {
+        if (_authState.value is AuthState.Loading) return
+
+        val normalizedUsername = username.trim()
+        if (normalizedUsername.isBlank() || password.isBlank()) {
+            _authState.value = AuthState.Error("Username dan password wajib diisi.")
+            return
+        }
+
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             try {
-                val response = apiService.login(LoginRequest(username.trim(), password))
+                val response = apiService.login(LoginRequest(normalizedUsername, password))
                 if (response.isSuccessful && response.body()?.token != null) {
                     val body = response.body()!!
                     val user = body.data
@@ -52,12 +61,18 @@ class AuthViewModel : ViewModel() {
 
                     _authState.value = AuthState.Success(user)
                 } else {
-                    val message = response.body()?.message ?: "Login gagal: periksa kredensial Anda."
+                    val message = extractErrorMessage(response, "Login gagal")
                     _authState.value = AuthState.Error(message)
                 }
             } catch (e: Exception) {
                 _authState.value = AuthState.Error("Terjadi kesalahan jaringan: ${e.message}")
             }
+        }
+    }
+
+    fun clearError() {
+        if (_authState.value is AuthState.Error) {
+            _authState.value = AuthState.Idle
         }
     }
 }

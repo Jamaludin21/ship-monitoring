@@ -8,11 +8,16 @@ import retrofit2.converter.gson.GsonConverterFactory
 
 object RetrofitClient {
     private var tokenProvider: (() -> String?)? = null
+    private var unauthorizedHandler: (() -> Unit)? = null
     private var retrofit: Retrofit? = null
     private var service: ApiService? = null
 
-    fun init(tokenProvider: () -> String?) {
+    fun init(
+        tokenProvider: () -> String?,
+        unauthorizedHandler: () -> Unit
+    ) {
         this.tokenProvider = tokenProvider
+        this.unauthorizedHandler = unauthorizedHandler
         retrofit = null
         service = null
     }
@@ -38,9 +43,13 @@ object RetrofitClient {
         val authInterceptor = AuthInterceptor {
             tokenProvider?.invoke()
         }
+        val unauthorizedInterceptor = UnauthorizedInterceptor {
+            unauthorizedHandler?.invoke()
+        }
 
         return OkHttpClient.Builder()
             .addInterceptor(authInterceptor)
+            .addInterceptor(unauthorizedInterceptor)
             .addInterceptor(logging)
             .build()
     }

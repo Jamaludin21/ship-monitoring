@@ -36,6 +36,6 @@ fun defaultInspectionChecklistItems(): List<InspectionChecklistItem> = listOf(
     InspectionChecklistItem(10, "Radio HT berfungsi dengan baik"),
     InspectionChecklistItem(11, "Joy stick dan kemudi berfungsi dengan baik"),
     InspectionChecklistItem(12, "Radio SSB berfungsi dengan baik"),
-    InspectionChecklistItem(13, "ECDIS NE430 SAMYUNG"),
+    InspectionChecklistItem(13, "ECDIS NF430 SAMYUNG"),
     InspectionChecklistItem(14, "NAVTEX")
 )
